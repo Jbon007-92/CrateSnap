@@ -122,6 +122,18 @@
           />
         </div>
         <div>
+          <label for="geminiApiKey" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+            Gemini API Key (for "Identify &amp; Appraise Photo")
+          </label>
+          <input
+            id="geminiApiKey"
+            type="password"
+            autocomplete="off"
+            placeholder="AIza… from aistudio.google.com/apikey"
+            class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+          />
+        </div>
+        <div>
           <label for="googleClientId" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
             Google OAuth Client ID (GIS / Drive &amp; Sheets API)
           </label>
@@ -661,6 +673,7 @@
         driveFolderId: document.getElementById('driveFolderId'),
         sheetUrlInput: document.getElementById('sheetUrlInput'),
         googleClientId: document.getElementById('googleClientId'),
+        geminiApiKey: document.getElementById('geminiApiKey'),
         appsScriptWebhook: document.getElementById('appsScriptWebhook'),
         saveConnectBtn: document.getElementById('saveConnectBtn'),
         connectSavedHint: document.getElementById('connectSavedHint'),
@@ -782,6 +795,7 @@
           driveFolderId: el.driveFolderId.value.trim(),
           sheetUrl: el.sheetUrlInput.value.trim(),
           googleClientId: el.googleClientId.value.trim(),
+          geminiApiKey: el.geminiApiKey.value.trim(),
           appsScriptWebhook: el.appsScriptWebhook.value.trim(),
         };
         try {
@@ -985,7 +999,11 @@
           const commaIdx = dataUrl.indexOf(',');
           currentImageBase64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : null;
           currentGeneratedFileId = makeMockDriveId(`${file.name}_${Date.now()}`);
+          // New photo = new record: clear the previous record's details.
+          [el.artistInput, el.albumInput, el.labelCatInput, el.formatYearInput, el.notesInput].forEach((i) => { i.value = ''; });
+          document.querySelectorAll('.defect-chk').forEach((c) => { c.checked = false; });
           syncDriveFields(true);
+          refreshOutputs();
           showBanner(`Photo loaded (${file.name}). Tap "Identify & Appraise Photo" to analyze.`, 'info');
         };
         reader.onerror = () => {
@@ -1027,9 +1045,17 @@
         el.analyzePhotoBtn.disabled = true;
         el.analyzeBtnLabel.textContent = 'Analyzing...';
 
+        const apiKey = connectConfig.geminiApiKey || '';
+        if (!apiKey) {
+          el.analyzePhotoBtn.disabled = false;
+          el.analyzeBtnLabel.textContent = 'Identify & Appraise Photo';
+          showBanner('Add your Gemini API key in "Drive & Sheets" to identify photos (free key at aistudio.google.com/apikey).', 'warn');
+          return;
+        }
+
         try {
-          const apiKey = '';
-          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+          // Newest model first; fall back if Google has retired a preview name.
+          const GEMINI_MODELS = ['gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-2.5-flash'];
 
           const prompt = [
             'Identify this vinyl record and jacket from the photo.',
@@ -1089,14 +1115,25 @@
             },
           };
 
-          const response = await fetchWithBackoff(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
+          let response = null;
+          for (const model of GEMINI_MODELS) {
+            response = await fetchWithBackoff(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+              body: JSON.stringify(payload),
+            });
+            if (response.status !== 404) break;
+          }
 
           if (!response.ok) {
-            throw new Error(`API status ${response.status}`);
+            let detail = '';
+            try {
+              const j = await response.json();
+              detail = (j.error && j.error.message) || '';
+            } catch (e) { /* ignore */ }
+            const err = new Error(`Gemini error ${response.status}${detail ? ': ' + detail : ''}`);
+            err.userFacing = true;
+            throw err;
           }
 
           const result = await response.json();
@@ -1127,7 +1164,7 @@
         } catch (err) {
           syncDriveFields(false);
           refreshOutputs();
-          showBanner('Could not run live AI appraisal here—fill or pick a preset and calculate value manually.', 'warn');
+          showBanner(err && err.userFacing ? err.message : 'Could not run live AI appraisal here—fill the fields in by hand.', err && err.userFacing ? 'error' : 'warn');
         } finally {
           el.analyzePhotoBtn.disabled = false;
           el.analyzeBtnLabel.textContent = 'Identify & Appraise Photo';
@@ -1583,11 +1620,15 @@
       el.driveFolderId.value = connectConfig.driveFolderId || '';
       el.sheetUrlInput.value = connectConfig.sheetUrl || '';
       el.googleClientId.value = connectConfig.googleClientId || '';
+      el.geminiApiKey.value = connectConfig.geminiApiKey || '';
       el.appsScriptWebhook.value = connectConfig.appsScriptWebhook || '';
       updateConnectBadge();
       preloadGoogleSignIn();
 
-      applyPreset('jazz10');
+      // Start blank (presets are still one tap away) so sample data is never
+      // mistaken for an identification of your photo.
+      syncDriveFields(true);
+      refreshOutputs();
       renderSessionLog();
     })();
   </script>

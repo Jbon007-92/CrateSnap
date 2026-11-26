@@ -1200,7 +1200,8 @@
 
       function extractSheetId(input) {
         const s = (input || '').trim();
-        const m = s.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+        // Google Sheets link, Drive file link (drive.google.com/file/d/…), or ?id= link.
+        const m = s.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/) || s.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
         if (m) return m[1];
         return /^[a-zA-Z0-9_-]{20,}$/.test(s) ? s : '';
       }

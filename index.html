@@ -176,7 +176,7 @@
             <strong>Option A — Google Apps Script Webhook (Easiest on Mobile):</strong> Create a bound script on your Google Sheet with <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">doPost(e)</code> that decodes base64 image data into <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">DriveApp.getFolderById(folderId).createFile(...)</code>, sets sharing so the photo link is accessible, and calls <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">sheet.appendRow([...])</code>. Deploy as a Web App ("Execute as: Me", "Who has access: Anyone with link" or restricted) and paste the URL above.
           </li>
           <li>
-            <strong>Option B — Google sign-in (built in):</strong> Paste your OAuth Client ID and Sheet URL above and save. "Upload / Sync" signs you in with Google, uploads the photo to Drive and adds the row to your sheet. Google only lets CrateSnap write to folders it created, so if it can't use your folder ID it makes a "CrateSnap Photos" folder and uses that.
+            <strong>Option B — Google sign-in (built in):</strong> Paste your OAuth Client ID and Sheet URL above and save. "Save to Sheet &amp; Drive" signs you in with Google, uploads the photo to Drive and adds the row to your sheet. Google only lets CrateSnap write to folders it created, so if it can't use your folder ID it makes a "CrateSnap Photos" folder and uses that.
           </li>
           <li>
             <strong>Option C — Zero-Config Crate Workflow (Active by Default):</strong> Snap photos on your phone, review the AI appraisal &amp; price range, copy the TSV row directly into Google Sheets (or download CSV), and paste ready-made Discogs/eBay listings whenever you sell.
@@ -262,37 +262,6 @@
                 class="px-3.5 py-2.5 text-xs sm:text-sm font-medium rounded-xl bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 transition"
               >
                 Clear Photo
-              </button>
-            </div>
-          </div>
-
-          <!-- Quick Test Presets -->
-          <div class="pt-1">
-            <p class="text-xs font-medium text-stone-600 dark:text-stone-400 mb-2">Quick Test Presets (Offline / Instant Demo):</p>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <button
-                type="button"
-                data-preset="jazz10"
-                class="preset-btn text-left p-2.5 rounded-xl bg-stone-50 hover:bg-amber-50 dark:bg-stone-800/70 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 transition"
-              >
-                <span class="block text-xs font-semibold text-stone-900 dark:text-stone-100">10" Jazz LP</span>
-                <span class="block text-[11px] text-stone-500 dark:text-stone-400 truncate">Prestige 135 • Mambo Jazz</span>
-              </button>
-              <button
-                type="button"
-                data-preset="signed"
-                class="preset-btn text-left p-2.5 rounded-xl bg-stone-50 hover:bg-amber-50 dark:bg-stone-800/70 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 transition"
-              >
-                <span class="block text-xs font-semibold text-stone-900 dark:text-stone-100">Autographed LP</span>
-                <span class="block text-[11px] text-stone-500 dark:text-stone-400 truncate">Billy Taylor • Signed</span>
-              </button>
-              <button
-                type="button"
-                data-preset="modern"
-                class="preset-btn text-left p-2.5 rounded-xl bg-stone-50 hover:bg-amber-50 dark:bg-stone-800/70 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 transition"
-              >
-                <span class="block text-xs font-semibold text-stone-900 dark:text-stone-100">Modern LP</span>
-                <span class="block text-[11px] text-stone-500 dark:text-stone-400 truncate">12" Reissue / Pressing</span>
               </button>
             </div>
           </div>
@@ -462,14 +431,7 @@
               type="button"
               class="flex-1 min-w-[180px] px-4 py-3 text-sm font-semibold rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white transition shadow-sm"
             >
-              + Add to Session &amp; Sheet Row
-            </button>
-            <button
-              id="syncDriveSheetBtn"
-              type="button"
-              class="px-4 py-3 text-sm font-medium rounded-xl bg-stone-800 hover:bg-stone-900 dark:bg-stone-700 dark:hover:bg-stone-600 text-white transition"
-            >
-              Upload / Sync
+              Save to Sheet &amp; Drive
             </button>
           </div>
         </section>
@@ -571,7 +533,7 @@
 
           <div id="sessionLogList" class="space-y-2.5 max-h-96 overflow-y-auto pr-0.5">
             <p id="emptySessionMsg" class="text-xs text-stone-500 dark:text-stone-400 py-6 text-center border border-dashed border-stone-200 dark:border-stone-800 rounded-xl">
-              No records logged in this session yet. Use a preset or snap a photo to add your first entry.
+              No records logged in this session yet. Snap a photo and tap "Save to Sheet &amp; Drive" to add your first entry.
             </p>
           </div>
         </section>
@@ -591,58 +553,6 @@
         records: 'cratesnap_session_records_v1',
         config: 'cratesnap_drive_sheet_config_v1',
         theme: 'cratesnap_theme_v1',
-      };
-
-      // Quick test presets so users can test immediately on mobile or desktop
-      const PRESETS = {
-        jazz10: {
-          artist: 'Sonny Stitt, Joe Holiday, Kenny Graham, Sonny Rollins',
-          album: 'Mambo Jazz',
-          labelCat: 'Prestige PRLP 135',
-          formatYear: '10" Mono LP • 1952 US 1st',
-          priceLow: 45,
-          priceHigh: 75,
-          condition: 'VG+',
-          seamSplit: false,
-          ringWear: true,
-          foxing: true,
-          autograph: false,
-          notes: 'Light edge/corner wear, glossy vinyl, clean labels',
-          salesStatus: 'For Sale - Discogs/eBay',
-          fileId: '1DriveSampleOriginalPressing001',
-        },
-        signed: {
-          artist: 'Billy Taylor Trio',
-          album: 'Billy Taylor Plays for D.J.\'s',
-          labelCat: 'Prestige LP 184',
-          formatYear: '10" Mono LP • 1954 US 1st',
-          priceLow: 55,
-          priceHigh: 90,
-          condition: 'VG+',
-          seamSplit: false,
-          ringWear: false,
-          foxing: true,
-          autograph: true,
-          notes: 'Signed & inscribed by Billy Taylor on back slick',
-          salesStatus: 'Keep / Audit',
-          fileId: '1DriveSampleSignedCopy001',
-        },
-        modern: {
-          artist: 'Eric Dolphy',
-          album: 'Out to Lunch!',
-          labelCat: 'Blue Note BST 84163',
-          formatYear: '12" LP • Stereo Pressing',
-          priceLow: 35,
-          priceHigh: 65,
-          condition: 'NM',
-          seamSplit: false,
-          ringWear: false,
-          foxing: false,
-          autograph: false,
-          notes: 'Clean cover and vinyl, minimal handling',
-          salesStatus: 'For Sale - Discogs/eBay',
-          fileId: '1DriveSampleModernPressing001',
-        },
       };
 
       const GRADE_MULTIPLIERS = {
@@ -710,7 +620,6 @@
         adjustedValueDisplay: document.getElementById('adjustedValueDisplay'),
         priceRangeDisplay: document.getElementById('priceRangeDisplay'),
         addToLogBtn: document.getElementById('addToLogBtn'),
-        syncDriveSheetBtn: document.getElementById('syncDriveSheetBtn'),
         downloadCsvBtn: document.getElementById('downloadCsvBtn'),
         copyTsvBtn: document.getElementById('copyTsvBtn'),
         tsvRowOutput: document.getElementById('tsvRowOutput'),
@@ -962,29 +871,6 @@
         el.listingOutput.value = buildSalesListing(data, el.listingChannelSelect.value);
       }
 
-      // --- Apply Preset ---
-      function applyPreset(key) {
-        const p = PRESETS[key];
-        if (!p) return;
-        currentGeneratedFileId = p.fileId;
-        el.artistInput.value = p.artist;
-        el.albumInput.value = p.album;
-        el.labelCatInput.value = p.labelCat;
-        el.formatYearInput.value = p.formatYear;
-        el.priceLowInput.value = p.priceLow;
-        el.priceHighInput.value = p.priceHigh;
-        el.conditionSelect.value = p.condition;
-        el.defSeamSplit.checked = p.seamSplit;
-        el.defRingWear.checked = p.ringWear;
-        el.defFoxing.checked = p.foxing;
-        el.defAutograph.checked = p.autograph;
-        el.notesInput.value = p.notes;
-        el.salesStatusSelect.value = p.salesStatus;
-        syncDriveFields(true);
-        refreshOutputs();
-        showBanner(`Loaded "${p.album}" preset. Ready to log or tweak.`, 'info');
-      }
-
       // --- Photo Input & Gemini Appraisal ---
       el.photoInput.addEventListener('change', (e) => {
         const file = e.target.files && e.target.files[0];
@@ -1220,7 +1106,10 @@
               accessTokenExpiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000 - 60000;
               p.resolve(accessToken);
             } else {
-              p.reject(new Error((resp && (resp.error_description || resp.error)) || 'Google sign-in failed.'));
+              const code = resp && resp.error;
+              p.reject(new Error(code === 'access_denied'
+                ? 'Google blocked the sign-in (access denied). Make sure you pick the Google account you added as a test user, and allow both Drive and Sheets access.'
+                : (resp && (resp.error_description || resp.error)) || 'Google sign-in failed.'));
             }
           },
           error_callback: (err) => {
@@ -1244,7 +1133,7 @@
         if (!prepareTokenClient()) {
           return loadGis().then(() => {
             prepareTokenClient();
-            throw new Error('Google sign-in is ready now. Tap "Upload / Sync" again.');
+            throw new Error('Google sign-in is ready now. Tap "Save to Sheet & Drive" again.');
           });
         }
         return new Promise((resolve, reject) => {
@@ -1316,18 +1205,59 @@
         return /^[a-zA-Z0-9_-]{20,}$/.test(s) ? s : '';
       }
 
+      // Accepts a bare folder ID or a pasted Drive folder link.
+      function extractFolderId(input) {
+        const s = (input || '').trim();
+        const m = s.match(/\/folders\/([a-zA-Z0-9_-]+)/) || s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+        return m ? m[1] : s;
+      }
+
+      async function signedInEmail() {
+        try {
+          const r = await googleFetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)');
+          if (!r.ok) return '';
+          const j = await r.json();
+          return (j.user && j.user.emailAddress) || '';
+        } catch (e) {
+          return '';
+        }
+      }
+
+      async function sheetProblem(res, sheetId) {
+        let detail = '';
+        try {
+          const j = await res.json();
+          detail = (j.error && j.error.message) || '';
+        } catch (e) { /* ignore */ }
+        if (res.status === 400 && /not supported for this document/i.test(detail)) {
+          return new Error('That sheet is an Excel (.xlsx) file, which Google won\'t let apps write to. Open it in Google Sheets, choose File → Save as Google Sheets, and put the new link in "Drive & Sheets".');
+        }
+        if (res.status === 404 || res.status === 403) {
+          const who = await signedInEmail();
+          return new Error(`Google can't find that sheet for ${who || 'the account you signed in with'} (error ${res.status}). Check the sheet link in "Drive & Sheets" (it should look like docs.google.com/spreadsheets/d/…), and that this account owns the sheet or has edit access to it.`);
+        }
+        return new Error(`Saving to the sheet failed (${res.status})${detail ? ': ' + detail : ''} [sheet ${sheetId.slice(0, 6)}…]`);
+      }
+
+      let uploadedImageRef = null; // avoids uploading the same photo twice on retry
+      let uploadedImageLink = '';
+
+      // Returns true when everything that is configured was saved.
       async function syncWithGoogle() {
         const tokenPromise = getAccessToken(); // keep first: needs the click gesture
-        el.syncDriveSheetBtn.disabled = true;
+        el.addToLogBtn.disabled = true;
         try {
           await tokenPromise;
           let note = '';
 
-          // 1. Photo -> Drive (only if a photo was taken/picked this session)
-          if (currentImageBase64) {
+          // 1. Photo -> Drive (only if a photo was taken/picked and not uploaded yet)
+          if (currentImageBase64 && uploadedImageRef === currentImageBase64) {
+            el.driveLinkInput.value = uploadedImageLink;
+            refreshOutputs();
+          } else if (currentImageBase64) {
             showBanner('Uploading photo to Google Drive…', 'info');
             const filename = buildDriveFilename();
-            let folderId = connectConfig.driveFolderId || '';
+            let folderId = extractFolderId(connectConfig.driveFolderId);
             let res = await uploadPhotoToDrive(filename, folderId);
             if (!res.ok && folderId && (res.status === 404 || res.status === 403)) {
               // drive.file can only write into folders this app created.
@@ -1338,21 +1268,24 @@
             if (!res.ok) throw await googleError(res, 'Drive upload');
             const file = await res.json();
             currentGeneratedFileId = file.id;
-            el.driveLinkInput.value = file.webViewLink || `https://drive.google.com/file/d/${file.id}/view?usp=drivesdk`;
+            uploadedImageRef = currentImageBase64;
+            uploadedImageLink = file.webViewLink || `https://drive.google.com/file/d/${file.id}/view?usp=drivesdk`;
+            el.driveLinkInput.value = uploadedImageLink;
             refreshOutputs();
           }
 
           // 2. Row -> Sheet
           const sheetId = extractSheetId(connectConfig.sheetUrl);
           if (!sheetId) {
-            showBanner(`${currentImageBase64 ? 'Photo uploaded to Drive. ' : ''}No Master Audit Sheet set in "Drive & Sheets", so no row was added.${note}`, currentImageBase64 ? 'success' : 'warn');
-            return;
+            showBanner(`${currentImageBase64 ? 'Photo uploaded to Drive, but no' : 'No'} Master Audit Sheet link is set in "Drive & Sheets" (it should look like docs.google.com/spreadsheets/d/…), so no row was added.${note}`, 'warn');
+            return false;
           }
+          showBanner('Adding the row to your sheet…', 'info');
           const data = computeAppraisal();
           const cells = toTsvRow(data).split('\t');
           const base = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values`;
           const head = await googleFetch(`${base}/A1:I1`);
-          if (!head.ok) throw await googleError(head, 'Reading the sheet');
+          if (!head.ok) throw await sheetProblem(head, sheetId);
           const headJson = await head.json();
           const values = headJson.values && headJson.values.length ? [cells] : [AUDIT_HEADERS, cells];
           const app = await googleFetch(`${base}/A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
@@ -1360,26 +1293,18 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ values }),
           });
-          if (!app.ok) throw await googleError(app, 'Adding the row to the sheet');
+          if (!app.ok) throw await sheetProblem(app, sheetId);
           showBanner(`Saved "${data.album}"${currentImageBase64 ? ' photo to Drive and' : ''} row to your sheet.${note}`, 'success');
+          return true;
         } catch (err) {
           showBanner(err.message || 'Google sync failed.', 'error');
+          return false;
         } finally {
-          el.syncDriveSheetBtn.disabled = false;
+          el.addToLogBtn.disabled = false;
         }
       }
 
-      // --- Drive & Sheet Sync (Google sign-in first, Apps Script webhook as fallback) ---
-      el.syncDriveSheetBtn.addEventListener('click', async () => {
-        if (connectConfig.googleClientId) {
-          syncWithGoogle();
-          return;
-        }
-        const data = computeAppraisal();
-        if (!connectConfig.appsScriptWebhook) {
-          showBanner('Not connected yet. Open "Drive & Sheets" and add your Google OAuth Client ID (or an Apps Script webhook).', 'info');
-          return;
-        }
+      async function sendToWebhook(data) {
         try {
           await fetch(connectConfig.appsScriptWebhook, {
             method: 'POST',
@@ -1394,11 +1319,13 @@
               imageMime: currentImageMime,
             }),
           });
-          showBanner(`Sent "${data.album}" payload to your Apps Script webhook.`, 'success');
+          showBanner(`Sent "${data.album}" to your Apps Script webhook.`, 'success');
+          return true;
         } catch (err) {
-          showBanner('Webhook request failed. Check your URL or copy the TSV row manually.', 'error');
+          showBanner('Webhook request failed. Check your URL or copy the row manually.', 'error');
+          return false;
         }
-      });
+      }
 
       // --- Session Log Management ---
       function renderSessionLog() {
@@ -1470,7 +1397,7 @@
           .replace(/"/g, '&quot;');
       }
 
-      el.addToLogBtn.addEventListener('click', () => {
+      function addToSessionLog() {
         const data = computeAppraisal();
         const entry = {
           ...data,
@@ -1480,12 +1407,23 @@
         sessionRecords.unshift(entry);
         saveRecords();
         renderSessionLog();
+        return entry;
+      }
 
-        // Prepare fresh Drive file ID for next record while keeping current fields visible
-        currentGeneratedFileId = null;
-        syncDriveFields(true);
-        refreshOutputs();
-        showBanner(`Added "${entry.album}" ($${entry.adjustedValue}) to session log.`, 'success');
+      el.addToLogBtn.addEventListener('click', async () => {
+        // Google path must start synchronously inside the tap (sign-in popup).
+        if (connectConfig.googleClientId) {
+          const ok = await syncWithGoogle();
+          if (ok) addToSessionLog();
+          return;
+        }
+        if (connectConfig.appsScriptWebhook) {
+          const ok = await sendToWebhook(computeAppraisal());
+          if (ok) addToSessionLog();
+          return;
+        }
+        const entry = addToSessionLog();
+        showBanner(`Added "${entry.album}" to the list on this phone only. To save to your sheet, add your Google OAuth Client ID and sheet link in "Drive & Sheets".`, 'warn');
       });
 
       el.clearSessionBtn.addEventListener('click', () => {
@@ -1582,9 +1520,6 @@
       el.dismissBannerBtn.addEventListener('click', hideBanner);
       el.saveConnectBtn.addEventListener('click', saveConfig);
 
-      document.querySelectorAll('.preset-btn').forEach((btn) => {
-        btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
-      });
 
       [
         el.artistInput,
@@ -1625,8 +1560,7 @@
       updateConnectBadge();
       preloadGoogleSignIn();
 
-      // Start blank (presets are still one tap away) so sample data is never
-      // mistaken for an identification of your photo.
+      // Start blank so nothing is mistaken for an identification of your photo.
       syncDriveFields(true);
       refreshOutputs();
       renderSessionLog();

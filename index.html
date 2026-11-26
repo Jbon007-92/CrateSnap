@@ -1349,6 +1349,7 @@
 
       // Which piece of the record a header means. Order matters.
       const HEADER_RULES = [
+        [/photo|image|picture|\bpics?\b/, 'photo'],
         [/label\s*[\/&]\s*cat|cat\w*\s*[\/&]\s*label/, 'labelCat'],
         [/^item\b|item\s*(#|no|num)|^#$|^no\.?$/, 'item'],
         [/status/, 'status'],
@@ -1365,8 +1366,8 @@
         [/\blow\b|min/, 'low'],
         [/\bhigh\b|max/, 'high'],
         [/range/, 'range'],
+        [/photo|image|picture|\bpics?\b|drive/, 'photo'],
         [/list|asking|price|value|worth|est/, 'value'],
-        [/photo|image|picture|drive|link|url/, 'photo'],
         [/note|defect|comment|remark|description/, 'notes'],
         [/date|added|logged/, 'date'],
       ];
@@ -1410,7 +1411,7 @@
           case 'high': return data.priceHigh;
           case 'range': return data.priceRange;
           case 'value': return data.adjustedValue;
-          case 'photo': return data.photoLink;
+          case 'photo': return realPhotoLink() ? `=HYPERLINK("${realPhotoLink()}","View photo")` : '';
           case 'notes': return notes;
           case 'date': return new Date().toISOString().slice(0, 10);
           default: return '';
@@ -1423,7 +1424,7 @@
       // simple 9-column append for an empty / header-less sheet.
       async function writeRowToSheet(spreadsheetId, data) {
         const api = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
-        const metaRes = await googleFetch(`${api}?fields=sheets(properties(sheetId,title,index))`);
+        const metaRes = await googleFetch(`${api}?fields=sheets(properties(sheetId,title,index,gridProperties(columnCount)))`);
         if (!metaRes.ok) throw await sheetProblem(metaRes, spreadsheetId);
         const meta = await metaRes.json();
         const tabs = (meta.sheets || []).map((x) => x.properties).sort((x, y) => x.index - y.index);
@@ -1477,17 +1478,29 @@
         const newIdx = lastIdx + 1;          // 0-based index of the new row
         const newRow = newIdx + 1;           // 1-based row number
         const prevRow = lastIdx + 1;         // 1-based row number of the row above
-        const ncols = Math.max(headers.length, ...(grid.slice(h + 1, lastIdx + 1).map((r) => (r || []).length)), 1);
+        const dataCols = Math.max(headers.length, ...(grid.slice(h + 1, lastIdx + 1).map((r) => (r || []).length)), 1);
+        let ncols = dataCols;
+        let addedPhotoCol = -1;
+        if (!keys.includes('photo') && realPhotoLink()) {
+          addedPhotoCol = dataCols;
+          keys[addedPhotoCol] = 'photo';
+          ncols = dataCols + 1;
+        }
         const prev = lastIdx > h ? (grid[lastIdx] || []) : [];
         const formulaCols = new Set();
         prev.forEach((c, i) => { if (typeof c === 'string' && c.startsWith('=')) formulaCols.add(i); });
 
-        const requests = [{
+        const requests = [];
+        const colCount = (tab.gridProperties && tab.gridProperties.columnCount) || 26;
+        if (ncols > colCount) {
+          requests.push({ appendDimension: { sheetId: tab.sheetId, dimension: 'COLUMNS', length: ncols - colCount } });
+        }
+        requests.push({
           insertDimension: {
             range: { sheetId: tab.sheetId, dimension: 'ROWS', startIndex: newIdx, endIndex: newIdx + 1 },
             inheritFromBefore: newIdx > 0,
           },
-        }];
+        });
         if (lastIdx > h) {
           const src = { sheetId: tab.sheetId, startRowIndex: lastIdx, endRowIndex: lastIdx + 1, startColumnIndex: 0, endColumnIndex: ncols };
           const dst = { sheetId: tab.sheetId, startRowIndex: newIdx, endRowIndex: newIdx + 1, startColumnIndex: 0, endColumnIndex: ncols };
@@ -1508,10 +1521,29 @@
         });
         if (!bu.ok) throw await sheetProblem(bu, spreadsheetId);
 
+        if (addedPhotoCol >= 0) {
+          // New "Photo Link" heading, styled like the heading next to it.
+          if (addedPhotoCol > 0) {
+            await googleFetch(`${api}:batchUpdate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ requests: [{ copyPaste: {
+                source: { sheetId: tab.sheetId, startRowIndex: h, endRowIndex: h + 1, startColumnIndex: addedPhotoCol - 1, endColumnIndex: addedPhotoCol },
+                destination: { sheetId: tab.sheetId, startRowIndex: h, endRowIndex: h + 1, startColumnIndex: addedPhotoCol, endColumnIndex: addedPhotoCol + 1 },
+                pasteType: 'PASTE_FORMAT',
+              } }] }),
+            });
+          }
+        }
+
         const dataUpdates = [];
+        if (addedPhotoCol >= 0) dataUpdates.push({ range: `${qs}!${colLetter(addedPhotoCol)}${h + 1}`, values: [['Photo Link']] });
+        const usedKeys = new Set(); // each kind of data fills only its first matching column
         for (let c = 0; c < ncols; c++) {
           if (formulaCols.has(c)) continue;
-          const v = valueForKey(keys[c], data, itemNo);
+          const key = keys[c] && !usedKeys.has(keys[c]) ? keys[c] : null;
+          if (key && key !== 'blank') usedKeys.add(key);
+          const v = valueForKey(key, data, itemNo);
           dataUpdates.push({ range: `${qs}!${colLetter(c)}${newRow}`, values: [[v]] });
         }
 
@@ -1545,6 +1577,10 @@
         });
         if (!wr.ok) throw await sheetProblem(wr, spreadsheetId);
         return `row to your sheet as ${itemNo !== '' ? 'item #' + itemNo + ', ' : ''}row ${newRow}${totalIdx >= 0 ? ' (above Total)' : ''}`;
+      }
+
+      function realPhotoLink() {
+        return (currentImageBase64 && uploadedImageRef === currentImageBase64) ? uploadedImageLink : '';
       }
 
       let uploadedImageRef = null; // avoids uploading the same photo twice on retry

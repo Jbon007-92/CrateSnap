@@ -635,6 +635,7 @@
       let currentImageBase64 = null;
       let currentImageMime = 'image/jpeg';
       let currentGeneratedFileId = null;
+      let aiLabelSplit = null; // label / catalog # from the last Identify
       let sessionRecords = loadRecords();
       let connectConfig = loadConfig();
 
@@ -946,7 +947,7 @@
           const prompt = [
             'Identify this vinyl record and jacket from the photo.',
             'Return a JSON object with keys:',
-            'artist, album, labelCat, formatYear, priceLow (number), priceHigh (number), condition (one of NM, VG+, VG, G+), seamSplit (boolean), ringWear (boolean), foxing (boolean), autograph (boolean), notes (string).',
+            'artist, album, labelCat (label + catalog number), label, catalogNumber, formatYear (format, year, pressing details), priceLow (number), priceHigh (number), condition (one of NM, VG+, VG, G+), seamSplit (boolean), ringWear (boolean), foxing (boolean), autograph (boolean), notes (string).',
             'Base priceLow and priceHigh in USD for typical collector market value.',
           ].join(' ');
 
@@ -974,6 +975,8 @@
                   artist: { type: 'STRING' },
                   album: { type: 'STRING' },
                   labelCat: { type: 'STRING' },
+                  label: { type: 'STRING' },
+                  catalogNumber: { type: 'STRING' },
                   formatYear: { type: 'STRING' },
                   priceLow: { type: 'NUMBER' },
                   priceHigh: { type: 'NUMBER' },
@@ -988,6 +991,8 @@
                   'artist',
                   'album',
                   'labelCat',
+                  'label',
+                  'catalogNumber',
                   'formatYear',
                   'priceLow',
                   'priceHigh',
@@ -1037,7 +1042,7 @@
             'Set priceLow and priceHigh (USD) to the typical range of those real sales (roughly the 25th to 75th percentile), not a guess. Round to whole dollars.',
             'Step 3: Judge visible condition from the photo.',
             'Reply with ONLY one JSON object in a ```json code block, keys:',
-            'artist, album, labelCat, formatYear, priceLow (number), priceHigh (number), condition (one of NM, VG+, VG, G+), seamSplit (boolean), ringWear (boolean), foxing (boolean), autograph (boolean), notes (string), priceBasis (string, e.g. "Discogs: 14 sales, median $68; eBay sold $55-$80").',
+            'artist, album, labelCat (label + catalog number), label, catalogNumber, formatYear (format, year, pressing details), priceLow (number), priceHigh (number), condition (one of NM, VG+, VG, G+), seamSplit (boolean), ringWear (boolean), foxing (boolean), autograph (boolean), notes (string), priceBasis (string, e.g. "Discogs: 14 sales, median $68; eBay sold $55-$80").',
           ].join(' ');
           try {
             const gr = await callGemini({
@@ -1085,6 +1090,11 @@
           if (parsed.artist) el.artistInput.value = parsed.artist;
           if (parsed.album) el.albumInput.value = parsed.album;
           if (parsed.labelCat) el.labelCatInput.value = parsed.labelCat;
+          aiLabelSplit = {
+            labelCat: el.labelCatInput.value,
+            label: typeof parsed.label === 'string' ? parsed.label.trim() : '',
+            catalogNumber: typeof parsed.catalogNumber === 'string' ? parsed.catalogNumber.trim() : '',
+          };
           if (parsed.formatYear) el.formatYearInput.value = parsed.formatYear;
           if (typeof parsed.priceLow === 'number') el.priceLowInput.value = Math.max(1, Math.round(parsed.priceLow));
           if (typeof parsed.priceHigh === 'number') el.priceHighInput.value = Math.max(1, Math.round(parsed.priceHigh));
@@ -1320,6 +1330,223 @@
         return new Error(`Saving to the sheet failed (${res.status})${detail ? ': ' + detail : ''} [sheet ${sheetId.slice(0, 6)}…]`);
       }
 
+
+      // ---------- Writing into the user's own sheet layout ----------
+      function colLetter(i) {
+        let n = i + 1;
+        let out = '';
+        while (n > 0) {
+          const m = (n - 1) % 26;
+          out = String.fromCharCode(65 + m) + out;
+          n = Math.floor((n - 1) / 26);
+        }
+        return out;
+      }
+
+      function quoteSheet(title) {
+        return `'${String(title).replace(/'/g, "''")}'`;
+      }
+
+      // Which piece of the record a header means. Order matters.
+      const HEADER_RULES = [
+        [/label\s*[\/&]\s*cat|cat\w*\s*[\/&]\s*label/, 'labelCat'],
+        [/^item\b|item\s*(#|no|num)|^#$|^no\.?$/, 'item'],
+        [/status/, 'status'],
+        [/location|shelf|crate|\bbin\b|box/, 'blank'],
+        [/artist|band|performer/, 'artist'],
+        [/^(title|album)|album title|record title/, 'album'],
+        [/catalog|cat\.?\s*(#|no|num)/, 'catalog'],
+        [/^label/, 'label'],
+        [/year/, 'year'],
+        [/pressing|matrix|format|edition|variant/, 'pressing'],
+        [/sleeve|jacket|cover/, 'blank'],
+        [/media|vinyl|disc|grade|condition/, 'grade'],
+        [/insurance|replacement/, 'insurance'],
+        [/\blow\b|min/, 'low'],
+        [/\bhigh\b|max/, 'high'],
+        [/range/, 'range'],
+        [/list|asking|price|value|worth|est/, 'value'],
+        [/photo|image|picture|drive|link|url/, 'photo'],
+        [/note|defect|comment|remark|description/, 'notes'],
+        [/date|added|logged/, 'date'],
+      ];
+
+      function headerKey(h) {
+        const t = String(h || '').trim().toLowerCase();
+        if (!t) return null;
+        for (const [re, key] of HEADER_RULES) if (re.test(t)) return key;
+        return null;
+      }
+
+      function splitLabelCat(labelCat) {
+        if (aiLabelSplit && aiLabelSplit.labelCat === labelCat && (aiLabelSplit.label || aiLabelSplit.catalogNumber)) {
+          return { label: aiLabelSplit.label, catalog: aiLabelSplit.catalogNumber };
+        }
+        const toks = String(labelCat || '').trim().split(/\s+/).filter(Boolean);
+        const isCatTok = (t) => /\d/.test(t) && /^[A-Za-z0-9][A-Za-z0-9.\-\/]*$/.test(t);
+        const isPrefix = (t, next) => /^[A-Z]{1,5}[-.]?$/.test(t) && next && isCatTok(next);
+        let k = toks.findIndex((t, i) => isCatTok(t) || isPrefix(t, toks[i + 1]));
+        if (k < 0) return { label: toks.join(' '), catalog: '' };
+        return { label: toks.slice(0, k).join(' '), catalog: toks.slice(k).join(' ') };
+      }
+
+      function valueForKey(key, data, itemNo) {
+        const yearMatch = String(data.formatYear || '').match(/\b(19|20)\d{2}\b/);
+        const lc = splitLabelCat(data.labelCat);
+        const notes = [data.appliedMods.join(', '), data.notes].filter(Boolean).join(' — ');
+        switch (key) {
+          case 'item': return itemNo;
+          case 'status': return 'Needs Review';
+          case 'artist': return data.artist;
+          case 'album': return data.album;
+          case 'labelCat': return data.labelCat;
+          case 'label': return lc.label;
+          case 'catalog': return lc.catalog;
+          case 'year': return yearMatch ? Number(yearMatch[0]) : '';
+          case 'pressing': return data.formatYear;
+          case 'grade': return data.condition;
+          case 'insurance': return data.priceHigh;
+          case 'low': return data.priceLow;
+          case 'high': return data.priceHigh;
+          case 'range': return data.priceRange;
+          case 'value': return data.adjustedValue;
+          case 'photo': return data.photoLink;
+          case 'notes': return notes;
+          case 'date': return new Date().toISOString().slice(0, 10);
+          default: return '';
+        }
+      }
+
+      // Puts the record in the sheet's own columns, as a new row directly
+      // above the "Total" row (formatting, dropdowns and formulas copied from
+      // the row above, totals stretched to include it). Falls back to the
+      // simple 9-column append for an empty / header-less sheet.
+      async function writeRowToSheet(spreadsheetId, data) {
+        const api = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
+        const metaRes = await googleFetch(`${api}?fields=sheets(properties(sheetId,title,index))`);
+        if (!metaRes.ok) throw await sheetProblem(metaRes, spreadsheetId);
+        const meta = await metaRes.json();
+        const tabs = (meta.sheets || []).map((x) => x.properties).sort((x, y) => x.index - y.index);
+        const gidMatch = String(connectConfig.sheetUrl || '').match(/[#&?]gid=(\d+)/);
+        const tab = (gidMatch && tabs.find((t) => String(t.sheetId) === gidMatch[1])) || tabs[0];
+        const qs = quoteSheet(tab.title);
+
+        const gridRes = await googleFetch(`${api}/values/${encodeURIComponent(qs)}?valueRenderOption=FORMULA`);
+        if (!gridRes.ok) throw await sheetProblem(gridRes, spreadsheetId);
+        const grid = (await gridRes.json()).values || [];
+
+        // Header row: first row (in the top 30) with Artist + Title/Album columns.
+        let h = -1;
+        for (let r = 0; r < Math.min(grid.length, 30); r++) {
+          const keys = (grid[r] || []).map(headerKey);
+          if (keys.includes('artist') && (keys.includes('album') || keys.includes('labelCat'))) { h = r; break; }
+        }
+
+        if (h < 0) {
+          const cells = toTsvRow(data).split('\t');
+          const values = grid.length ? [cells] : [AUDIT_HEADERS, cells];
+          const app = await googleFetch(`${api}/values/${encodeURIComponent(qs + '!A:I')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values }),
+          });
+          if (!app.ok) throw await sheetProblem(app, spreadsheetId);
+          return 'row to the end of your sheet';
+        }
+
+        const headers = grid[h];
+        const keys = headers.map(headerKey);
+        const isTotalRow = (row) => (row || []).slice(0, 3).some((c) => /^\s*(grand\s+)?total/i.test(String(c)));
+        let totalIdx = -1;
+        for (let r = h + 1; r < grid.length; r++) if (isTotalRow(grid[r])) { totalIdx = r; break; }
+        const end = totalIdx >= 0 ? totalIdx : grid.length;
+        let lastIdx = h;
+        for (let r = h + 1; r < end; r++) if ((grid[r] || []).some((c) => String(c).trim() !== '')) lastIdx = r;
+
+        const itemCol = keys.indexOf('item');
+        let itemNo = '';
+        if (itemCol >= 0) {
+          let max = 0;
+          for (let r = h + 1; r <= lastIdx; r++) {
+            const n = Number(String((grid[r] || [])[itemCol] || '').replace(/[^\d.]/g, ''));
+            if (Number.isFinite(n) && n > max) max = n;
+          }
+          itemNo = max + 1;
+        }
+
+        const newIdx = lastIdx + 1;          // 0-based index of the new row
+        const newRow = newIdx + 1;           // 1-based row number
+        const prevRow = lastIdx + 1;         // 1-based row number of the row above
+        const ncols = Math.max(headers.length, ...(grid.slice(h + 1, lastIdx + 1).map((r) => (r || []).length)), 1);
+        const prev = lastIdx > h ? (grid[lastIdx] || []) : [];
+        const formulaCols = new Set();
+        prev.forEach((c, i) => { if (typeof c === 'string' && c.startsWith('=')) formulaCols.add(i); });
+
+        const requests = [{
+          insertDimension: {
+            range: { sheetId: tab.sheetId, dimension: 'ROWS', startIndex: newIdx, endIndex: newIdx + 1 },
+            inheritFromBefore: newIdx > 0,
+          },
+        }];
+        if (lastIdx > h) {
+          const src = { sheetId: tab.sheetId, startRowIndex: lastIdx, endRowIndex: lastIdx + 1, startColumnIndex: 0, endColumnIndex: ncols };
+          const dst = { sheetId: tab.sheetId, startRowIndex: newIdx, endRowIndex: newIdx + 1, startColumnIndex: 0, endColumnIndex: ncols };
+          requests.push({ copyPaste: { source: src, destination: dst, pasteType: 'PASTE_FORMAT' } });
+          requests.push({ copyPaste: { source: src, destination: dst, pasteType: 'PASTE_DATA_VALIDATION' } });
+          formulaCols.forEach((c) => {
+            requests.push({ copyPaste: {
+              source: { ...src, startColumnIndex: c, endColumnIndex: c + 1 },
+              destination: { ...dst, startColumnIndex: c, endColumnIndex: c + 1 },
+              pasteType: 'PASTE_FORMULA',
+            } });
+          });
+        }
+        const bu = await googleFetch(`${api}:batchUpdate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requests }),
+        });
+        if (!bu.ok) throw await sheetProblem(bu, spreadsheetId);
+
+        const dataUpdates = [];
+        for (let c = 0; c < ncols; c++) {
+          if (formulaCols.has(c)) continue;
+          const v = valueForKey(keys[c], data, itemNo);
+          dataUpdates.push({ range: `${qs}!${colLetter(c)}${newRow}`, values: [[v]] });
+        }
+
+        // Stretch totals: ranges in the summary rows and the Total row that end
+        // on the old last row (e.g. SUM(K6:K79)) now end on the new row.
+        if (lastIdx > h && (h > 0 || totalIdx >= 0)) {
+          const totalRowNow = totalIdx >= 0 ? totalIdx + 2 : 0; // 1-based, after insert
+          const ranges = h > 0 ? [`${qs}!A1:${colLetter(ncols + 5)}${h}`] : [];
+          if (totalRowNow) ranges.push(`${qs}!A${totalRowNow}:${colLetter(ncols + 5)}${totalRowNow}`);
+          const fr = await googleFetch(`${api}/values:batchGet?valueRenderOption=FORMULA&${ranges.map((r) => 'ranges=' + encodeURIComponent(r)).join('&')}`);
+          if (fr.ok) {
+            const fj = await fr.json();
+            const re = new RegExp(`:(\\$?[A-Z]{1,3})(\\$?)${prevRow}(?!\\d)`, 'g');
+            (fj.valueRanges || []).forEach((vr, k) => {
+              const firstRow = (h > 0 && k === 0) ? 1 : totalRowNow;
+              (vr.values || []).forEach((row, ri) => row.forEach((cell, ci) => {
+                if (typeof cell === 'string' && cell.startsWith('=') && re.test(cell)) {
+                  re.lastIndex = 0;
+                  dataUpdates.push({ range: `${qs}!${colLetter(ci)}${firstRow + ri}`, values: [[cell.replace(re, `:$1$2${newRow}`)]] });
+                }
+                re.lastIndex = 0;
+              }));
+            });
+          }
+        }
+
+        const wr = await googleFetch(`${api}/values:batchUpdate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data: dataUpdates }),
+        });
+        if (!wr.ok) throw await sheetProblem(wr, spreadsheetId);
+        return `row to your sheet as ${itemNo !== '' ? 'item #' + itemNo + ', ' : ''}row ${newRow}${totalIdx >= 0 ? ' (above Total)' : ''}`;
+      }
+
       let uploadedImageRef = null; // avoids uploading the same photo twice on retry
       let uploadedImageLink = '';
 
@@ -1363,19 +1590,8 @@
           }
           showBanner('Adding the row to your sheet…', 'info');
           const data = computeAppraisal();
-          const cells = toTsvRow(data).split('\t');
-          const base = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values`;
-          const head = await googleFetch(`${base}/A1:I1`);
-          if (!head.ok) throw await sheetProblem(head, sheetId);
-          const headJson = await head.json();
-          const values = headJson.values && headJson.values.length ? [cells] : [AUDIT_HEADERS, cells];
-          const app = await googleFetch(`${base}/A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values }),
-          });
-          if (!app.ok) throw await sheetProblem(app, sheetId);
-          showBanner(`Saved "${data.album}"${currentImageBase64 ? ' photo to Drive and' : ''} row to your sheet.${note}`, 'success');
+          const placed = await writeRowToSheet(sheetId, data);
+          showBanner(`Saved "${data.album}"${currentImageBase64 ? ' photo to Drive and' : ''} ${placed}.${note}`, 'success');
           return true;
         } catch (err) {
           showBanner(err.message || 'Google sync failed.', 'error');

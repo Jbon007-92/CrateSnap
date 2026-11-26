@@ -966,6 +966,7 @@
               },
             ],
             generationConfig: {
+              temperature: 0,
               responseMimeType: 'application/json',
               responseSchema: {
                 type: 'OBJECT',
@@ -1001,34 +1002,86 @@
             },
           };
 
-          let response = null;
-          for (const model of GEMINI_MODELS) {
-            response = await fetchWithBackoff(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-              body: JSON.stringify(payload),
-            });
-            if (response.status !== 404) break;
-          }
+          const callGemini = async (body) => {
+            let r = null;
+            for (const model of GEMINI_MODELS) {
+              r = await fetchWithBackoff(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+                body: JSON.stringify(body),
+              });
+              if (r.status !== 404) break;
+            }
+            return r;
+          };
 
-          if (!response.ok) {
-            let detail = '';
+          const parseJsonLoose = (text) => {
+            const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+            const candidate = fenced ? fenced[1] : text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
             try {
-              const j = await response.json();
-              detail = (j.error && j.error.message) || '';
-            } catch (e) { /* ignore */ }
-            const err = new Error(`Gemini error ${response.status}${detail ? ': ' + detail : ''}`);
-            err.userFacing = true;
-            throw err;
-          }
+              const obj = JSON.parse(candidate);
+              return obj && typeof obj === 'object' ? obj : null;
+            } catch (e) {
+              return null;
+            }
+          };
 
-          const result = await response.json();
-          const rawText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!rawText) {
-            throw new Error('Empty response from model');
-          }
+          // 1) Preferred: look up real sold prices with Google Search grounding.
+          //    temperature 0 so the same photo gives the same answer.
+          let parsed = null;
+          let sources = [];
+          let priceBasis = '';
+          const groundedPrompt = [
+            'Step 1: Identify this exact vinyl record pressing from the photo (artist, album, label, catalog number, year, country, mono/stereo, original vs reissue).',
+            'Step 2: Use Google Search to find what copies of THIS pressing have actually SOLD for recently: Discogs sales history / marketplace statistics for the matching release, and eBay sold listings. Ignore asking prices of unsold listings when sold data exists.',
+            'Set priceLow and priceHigh (USD) to the typical range of those real sales (roughly the 25th to 75th percentile), not a guess. Round to whole dollars.',
+            'Step 3: Judge visible condition from the photo.',
+            'Reply with ONLY one JSON object in a ```json code block, keys:',
+            'artist, album, labelCat, formatYear, priceLow (number), priceHigh (number), condition (one of NM, VG+, VG, G+), seamSplit (boolean), ringWear (boolean), foxing (boolean), autograph (boolean), notes (string), priceBasis (string, e.g. "Discogs: 14 sales, median $68; eBay sold $55-$80").',
+          ].join(' ');
+          try {
+            const gr = await callGemini({
+              contents: [{ role: 'user', parts: [{ text: groundedPrompt }, { inlineData: { mimeType: currentImageMime, data: currentImageBase64 } }] }],
+              tools: [{ google_search: {} }],
+              generationConfig: { temperature: 0 },
+            });
+            if (gr.ok) {
+              const gj = await gr.json();
+              const cand = gj?.candidates?.[0];
+              const text = (cand?.content?.parts || []).map((pt) => pt.text || '').join('');
+              const obj = parseJsonLoose(text);
+              if (obj && (obj.artist || obj.album)) {
+                parsed = obj;
+                priceBasis = typeof obj.priceBasis === 'string' ? obj.priceBasis.trim() : '';
+                const seen = new Set();
+                (cand?.groundingMetadata?.groundingChunks || []).forEach((ch) => {
+                  const t = ch?.web?.title || '';
+                  if (t && !seen.has(t)) { seen.add(t); sources.push(t); }
+                });
+              }
+            }
+          } catch (e) { /* fall back below */ }
 
-          const parsed = JSON.parse(rawText);
+          // 2) Fallback: the original photo-only estimate (no web lookup).
+          if (!parsed) {
+            const response = await callGemini(payload);
+            if (!response.ok) {
+              let detail = '';
+              try {
+                const j = await response.json();
+                detail = (j.error && j.error.message) || '';
+              } catch (e) { /* ignore */ }
+              const err = new Error(`Gemini error ${response.status}${detail ? ': ' + detail : ''}`);
+              err.userFacing = true;
+              throw err;
+            }
+            const result = await response.json();
+            const rawText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!rawText) {
+              throw new Error('Empty response from model');
+            }
+            parsed = JSON.parse(rawText);
+          }
           if (parsed.artist) el.artistInput.value = parsed.artist;
           if (parsed.album) el.albumInput.value = parsed.album;
           if (parsed.labelCat) el.labelCatInput.value = parsed.labelCat;
@@ -1042,11 +1095,18 @@
           el.defRingWear.checked = Boolean(parsed.ringWear);
           el.defFoxing.checked = Boolean(parsed.foxing);
           el.defAutograph.checked = Boolean(parsed.autograph);
-          if (parsed.notes) el.notesInput.value = parsed.notes;
+          const noteParts = [];
+          if (parsed.notes) noteParts.push(parsed.notes);
+          if (priceBasis) noteParts.push(`Price basis: ${priceBasis}`);
+          el.notesInput.value = noteParts.join(' | ');
 
           syncDriveFields(true);
           refreshOutputs();
-          showBanner('Photo appraised! Review fields and add to your session log.', 'success');
+          if (sources.length || priceBasis) {
+            showBanner(`Appraised from real sales${sources.length ? ' (' + sources.slice(0, 3).join(', ') + ')' : ''}${priceBasis ? ': ' + priceBasis : ''}. Review, then save.`, 'success');
+          } else {
+            showBanner('Appraised from the photo only (no sales data found), so treat the price as a rough estimate. Review, then save.', 'warn');
+          }
         } catch (err) {
           syncDriveFields(false);
           refreshOutputs();

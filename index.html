@@ -164,7 +164,7 @@
             <strong>Option A — Google Apps Script Webhook (Easiest on Mobile):</strong> Create a bound script on your Google Sheet with <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">doPost(e)</code> that decodes base64 image data into <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">DriveApp.getFolderById(folderId).createFile(...)</code>, sets sharing so the photo link is accessible, and calls <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">sheet.appendRow([...])</code>. Deploy as a Web App ("Execute as: Me", "Who has access: Anyone with link" or restricted) and paste the URL above.
           </li>
           <li>
-            <strong>Option B — Google Identity Services (GIS) + Drive v3 &amp; Sheets v4 REST API:</strong> In Google Cloud Console, enable <em>Google Drive API</em> and <em>Google Sheets API</em>, configure an OAuth 2.0 Web Client ID with your app origin authorized, request scopes <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">drive.file</code> and <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">spreadsheets</code> via <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">google.accounts.oauth2.initTokenClient</code>, upload multipart/related to <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">drive/v3/files</code>, and append via <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">spreadsheets/{id}/values/A:I:append?valueInputOption=USER_ENTERED</code>.
+            <strong>Option B — Google sign-in (built in):</strong> Paste your OAuth Client ID and Sheet URL above and save. "Upload / Sync" signs you in with Google, uploads the photo to Drive and adds the row to your sheet. Google only lets CrateSnap write to folders it created, so if it can't use your folder ID it makes a "CrateSnap Photos" folder and uses that.
           </li>
           <li>
             <strong>Option C — Zero-Config Crate Workflow (Active by Default):</strong> Snap photos on your phone, review the AI appraisal &amp; price range, copy the TSV row directly into Google Sheets (or download CSV), and paste ready-made Discogs/eBay listings whenever you sell.
@@ -787,6 +787,7 @@
         try {
           localStorage.setItem(STORAGE_KEYS.config, JSON.stringify(connectConfig));
           updateConnectBadge();
+          preloadGoogleSignIn();
           el.connectSavedHint.textContent = 'Settings saved locally.';
           showBanner('Google Drive & Sheets connection settings saved.', 'success');
         } catch (err) {
@@ -795,7 +796,7 @@
       }
 
       function updateConnectBadge() {
-        const configured = Boolean(connectConfig.appsScriptWebhook || (connectConfig.driveFolderId && connectConfig.googleClientId));
+        const configured = Boolean(connectConfig.appsScriptWebhook || connectConfig.googleClientId);
         el.connectBadge.className = configured
           ? 'inline-block w-2 h-2 rounded-full bg-emerald-500'
           : 'inline-block w-2 h-2 rounded-full bg-amber-500';
@@ -1135,11 +1136,211 @@
 
       el.analyzePhotoBtn.addEventListener('click', analyzePhotoWithGemini);
 
-      // --- Optional Webhook / Drive Sync ---
+      // --- Google Sign-In (GIS) + Drive v3 upload + Sheets v4 append ---
+      // Nothing account-specific lives in this file: client ID, folder and sheet
+      // come from the Drive & Sheets panel and stay in this browser's localStorage.
+      const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
+      let gisLoadPromise = null;
+      let tokenClient = null;
+      let tokenClientId = null;
+      let accessToken = null;
+      let accessTokenExpiresAt = 0;
+      let pendingToken = null;
+
+      function loadGis() {
+        if (window.google && window.google.accounts && window.google.accounts.oauth2) return Promise.resolve();
+        if (!gisLoadPromise) {
+          gisLoadPromise = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://accounts.google.com/gsi/client';
+            s.async = true;
+            s.onload = () => resolve();
+            s.onerror = () => {
+              gisLoadPromise = null;
+              reject(new Error('Could not load Google sign-in.'));
+            };
+            document.head.appendChild(s);
+          });
+        }
+        return gisLoadPromise;
+      }
+
+      function prepareTokenClient() {
+        const clientId = connectConfig.googleClientId;
+        if (!clientId || !(window.google && window.google.accounts && window.google.accounts.oauth2)) return false;
+        if (tokenClient && tokenClientId === clientId) return true;
+        tokenClientId = clientId;
+        accessToken = null;
+        tokenClient = window.google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: GOOGLE_SCOPES,
+          callback: (resp) => {
+            const p = pendingToken;
+            pendingToken = null;
+            if (!p) return;
+            if (resp && resp.access_token) {
+              accessToken = resp.access_token;
+              accessTokenExpiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000 - 60000;
+              p.resolve(accessToken);
+            } else {
+              p.reject(new Error((resp && (resp.error_description || resp.error)) || 'Google sign-in failed.'));
+            }
+          },
+          error_callback: (err) => {
+            const p = pendingToken;
+            pendingToken = null;
+            if (p) p.reject(new Error(err && err.type === 'popup_closed' ? 'Google sign-in was closed.' : 'Google sign-in was blocked or failed.'));
+          },
+        });
+        return true;
+      }
+
+      function preloadGoogleSignIn() {
+        if (!connectConfig.googleClientId) return;
+        loadGis().then(prepareTokenClient).catch(() => {});
+      }
+
+      // Must be called straight from the click (before any await) so the
+      // sign-in popup is not blocked, especially on iPhone Safari.
+      function getAccessToken() {
+        if (accessToken && Date.now() < accessTokenExpiresAt) return Promise.resolve(accessToken);
+        if (!prepareTokenClient()) {
+          return loadGis().then(() => {
+            prepareTokenClient();
+            throw new Error('Google sign-in is ready now. Tap "Upload / Sync" again.');
+          });
+        }
+        return new Promise((resolve, reject) => {
+          pendingToken = { resolve, reject };
+          tokenClient.requestAccessToken({ prompt: '' });
+        });
+      }
+
+      async function googleFetch(url, options = {}) {
+        const res = await fetch(url, {
+          ...options,
+          headers: { ...(options.headers || {}), Authorization: `Bearer ${accessToken}` },
+        });
+        if (res.status === 401) accessToken = null;
+        return res;
+      }
+
+      async function googleError(res, what) {
+        let detail = '';
+        try {
+          const j = await res.json();
+          detail = (j.error && j.error.message) || '';
+        } catch (e) { /* ignore */ }
+        return new Error(`${what} failed (${res.status})${detail ? ': ' + detail : ''}`);
+      }
+
+      function base64ToBytes(b64) {
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return bytes;
+      }
+
+      async function createCrateSnapFolder() {
+        const res = await googleFetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'CrateSnap Photos', mimeType: 'application/vnd.google-apps.folder' }),
+        });
+        if (!res.ok) throw await googleError(res, 'Creating the CrateSnap Photos folder');
+        const j = await res.json();
+        connectConfig.driveFolderId = j.id;
+        el.driveFolderId.value = j.id;
+        try { localStorage.setItem(STORAGE_KEYS.config, JSON.stringify(connectConfig)); } catch (e) { /* ignore */ }
+        return j.id;
+      }
+
+      async function uploadPhotoToDrive(filename, folderId) {
+        const boundary = `cratesnap${Date.now()}`;
+        const meta = { name: filename, mimeType: currentImageMime };
+        if (folderId) meta.parents = [folderId];
+        const body = new Blob([
+          `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n`,
+          `--${boundary}\r\nContent-Type: ${currentImageMime}\r\n\r\n`,
+          base64ToBytes(currentImageBase64),
+          `\r\n--${boundary}--`,
+        ]);
+        return googleFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink&supportsAllDrives=true', {
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+          body,
+        });
+      }
+
+      function extractSheetId(input) {
+        const s = (input || '').trim();
+        const m = s.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+        if (m) return m[1];
+        return /^[a-zA-Z0-9_-]{20,}$/.test(s) ? s : '';
+      }
+
+      async function syncWithGoogle() {
+        const tokenPromise = getAccessToken(); // keep first: needs the click gesture
+        el.syncDriveSheetBtn.disabled = true;
+        try {
+          await tokenPromise;
+          let note = '';
+
+          // 1. Photo -> Drive (only if a photo was taken/picked this session)
+          if (currentImageBase64) {
+            showBanner('Uploading photo to Google Drive…', 'info');
+            const filename = buildDriveFilename();
+            let folderId = connectConfig.driveFolderId || '';
+            let res = await uploadPhotoToDrive(filename, folderId);
+            if (!res.ok && folderId && (res.status === 404 || res.status === 403)) {
+              // drive.file can only write into folders this app created.
+              folderId = await createCrateSnapFolder();
+              note = ' CrateSnap could not write to your folder, so it made a "CrateSnap Photos" folder in your Drive and will use that from now on.';
+              res = await uploadPhotoToDrive(filename, folderId);
+            }
+            if (!res.ok) throw await googleError(res, 'Drive upload');
+            const file = await res.json();
+            currentGeneratedFileId = file.id;
+            el.driveLinkInput.value = file.webViewLink || `https://drive.google.com/file/d/${file.id}/view?usp=drivesdk`;
+            refreshOutputs();
+          }
+
+          // 2. Row -> Sheet
+          const sheetId = extractSheetId(connectConfig.sheetUrl);
+          if (!sheetId) {
+            showBanner(`${currentImageBase64 ? 'Photo uploaded to Drive. ' : ''}No Master Audit Sheet set in "Drive & Sheets", so no row was added.${note}`, currentImageBase64 ? 'success' : 'warn');
+            return;
+          }
+          const data = computeAppraisal();
+          const cells = toTsvRow(data).split('\t');
+          const base = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values`;
+          const head = await googleFetch(`${base}/A1:I1`);
+          if (!head.ok) throw await googleError(head, 'Reading the sheet');
+          const headJson = await head.json();
+          const values = headJson.values && headJson.values.length ? [cells] : [AUDIT_HEADERS, cells];
+          const app = await googleFetch(`${base}/A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values }),
+          });
+          if (!app.ok) throw await googleError(app, 'Adding the row to the sheet');
+          showBanner(`Saved "${data.album}"${currentImageBase64 ? ' photo to Drive and' : ''} row to your sheet.${note}`, 'success');
+        } catch (err) {
+          showBanner(err.message || 'Google sync failed.', 'error');
+        } finally {
+          el.syncDriveSheetBtn.disabled = false;
+        }
+      }
+
+      // --- Drive & Sheet Sync (Google sign-in first, Apps Script webhook as fallback) ---
       el.syncDriveSheetBtn.addEventListener('click', async () => {
+        if (connectConfig.googleClientId) {
+          syncWithGoogle();
+          return;
+        }
         const data = computeAppraisal();
         if (!connectConfig.appsScriptWebhook) {
-          showBanner('No Apps Script webhook configured. Use "Copy Row for Sheets" or open "Drive & Sheets" to add your webhook.', 'info');
+          showBanner('Not connected yet. Open "Drive & Sheets" and add your Google OAuth Client ID (or an Apps Script webhook).', 'info');
           return;
         }
         try {
@@ -1384,6 +1585,7 @@
       el.googleClientId.value = connectConfig.googleClientId || '';
       el.appsScriptWebhook.value = connectConfig.appsScriptWebhook || '';
       updateConnectBadge();
+      preloadGoogleSignIn();
 
       applyPreset('jazz10');
       renderSessionLog();

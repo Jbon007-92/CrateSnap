@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CrateSnap Audit — Vinyl &amp; Record Cataloger</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body class="bg-stone-100 text-stone-900 dark:bg-stone-950 dark:text-stone-100 antialiased min-h-screen">
+  <!-- Top Bar -->
+  <header class="sticky top-0 z-30 bg-white/95 dark:bg-stone-900/95 backdrop-blur border-b border-stone-200 dark:border-stone-800">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+          <!-- Vinyl disc SVG icon -->
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="9" />
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 3a9 9 0 0 1 6.36 2.64" stroke-linecap="round" />
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <h1 class="text-base sm:text-lg font-bold tracking-tight truncate">CrateSnap Audit</h1>
+          <p class="text-xs text-stone-500 dark:text-stone-400 truncate">Vinyl &amp; Record Cataloger</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 shrink-0">
+        <button
+          id="toggleConnectBtn"
+          type="button"
+          class="px-3 py-2 text-xs sm:text-sm font-medium rounded-xl bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 border border-stone-300 dark:border-stone-700 transition flex items-center gap-1.5"
+        >
+          <span>Drive &amp; Sheets</span>
+          <span id="connectBadge" class="inline-block w-2 h-2 rounded-full bg-amber-500"></span>
+        </button>
+        <button
+          id="themeToggleBtn"
+          type="button"
+          aria-label="Toggle color theme"
+          class="p-2 rounded-xl bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 border border-stone-300 dark:border-stone-700 transition"
+        >
+          <svg id="sunIcon" class="w-4 h-4 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41" stroke-linecap="round" />
+          </svg>
+          <svg id="moonIcon" class="w-4 h-4 block dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Toast / Status Banner -->
+  <div id="statusBanner" class="hidden max-w-5xl mx-auto px-4 pt-3">
+    <div id="statusBannerInner" class="rounded-2xl px-4 py-3 text-sm font-medium flex items-center justify-between gap-3 border">
+      <span id="statusBannerText"></span>
+      <button id="dismissBannerBtn" type="button" class="text-xs underline opacity-80 hover:opacity-100">Dismiss</button>
+    </div>
+  </div>
+
+  <!-- Collapsible Google Drive & Sheets Connection Drawer -->
+  <section id="connectDrawer" class="hidden max-w-5xl mx-auto px-4 pt-4">
+    <div class="rounded-2xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 p-4 sm:p-5 shadow-sm space-y-4">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h2 class="text-sm sm:text-base font-semibold">Connect to Google Drive &amp; Google Sheets</h2>
+          <p class="text-xs sm:text-sm text-stone-600 dark:text-stone-400 mt-0.5">
+            Configure your Drive folder, target Sheet, or an Apps Script webhook so rows &amp; photo links stay aligned with your master audit sheet.
+          </p>
+        </div>
+        <button id="closeDrawerBtn" type="button" class="text-xs px-2.5 py-1.5 rounded-lg bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700">
+          Hide
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label for="driveFolderId" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+            Google Drive Photos Folder ID
+          </label>
+          <input
+            id="driveFolderId"
+            type="text"
+            placeholder="e.g. 1AbCdEfGhIjKlMnOpQrStUvWxYz"
+            class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+          />
+        </div>
+        <div>
+          <label for="sheetUrlInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+            Master Audit Sheet URL / ID
+          </label>
+          <input
+            id="sheetUrlInput"
+            type="text"
+            placeholder="https://docs.google.com/spreadsheets/d/..."
+            class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+          />
+        </div>
+        <div>
+          <label for="googleClientId" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+            Google OAuth Client ID (GIS / Drive &amp; Sheets API)
+          </label>
+          <input
+            id="googleClientId"
+            type="text"
+            placeholder="xxxx.apps.googleusercontent.com"
+            class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+          />
+        </div>
+        <div>
+          <label for="appsScriptWebhook" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+            Apps Script Web App Webhook (Optional)
+          </label>
+          <input
+            id="appsScriptWebhook"
+            type="url"
+            placeholder="https://script.google.com/macros/s/.../exec"
+            class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+          />
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+        <button
+          id="saveConnectBtn"
+          type="button"
+          class="px-4 py-2 text-xs sm:text-sm font-medium rounded-xl bg-amber-600 hover:bg-amber-700 text-white transition"
+        >
+          Save Connection Settings
+        </button>
+        <span id="connectSavedHint" class="text-xs text-stone-500 dark:text-stone-400"></span>
+      </div>
+
+      <!-- Practical Setup Instructions -->
+      <div class="border-t border-stone-200 dark:border-stone-800 pt-3 text-xs text-stone-600 dark:text-stone-400 space-y-2 leading-relaxed">
+        <p class="font-semibold text-stone-800 dark:text-stone-200">Quick Setup Options for Live Drive Upload &amp; Sheet Append:</p>
+        <ol class="list-decimal pl-4 space-y-1.5">
+          <li>
+            <strong>Option A — Google Apps Script Webhook (Easiest on Mobile):</strong> Create a bound script on your Google Sheet with <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">doPost(e)</code> that decodes base64 image data into <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">DriveApp.getFolderById(folderId).createFile(...)</code>, sets sharing so the photo link is accessible, and calls <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">sheet.appendRow([...])</code>. Deploy as a Web App ("Execute as: Me", "Who has access: Anyone with link" or restricted) and paste the URL above.
+          </li>
+          <li>
+            <strong>Option B — Google Identity Services (GIS) + Drive v3 &amp; Sheets v4 REST API:</strong> In Google Cloud Console, enable <em>Google Drive API</em> and <em>Google Sheets API</em>, configure an OAuth 2.0 Web Client ID with your app origin authorized, request scopes <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">drive.file</code> and <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">spreadsheets</code> via <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">google.accounts.oauth2.initTokenClient</code>, upload multipart/related to <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">drive/v3/files</code>, and append via <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800">spreadsheets/{id}/values/A:I:append?valueInputOption=USER_ENTERED</code>.
+          </li>
+          <li>
+            <strong>Option C — Zero-Config Crate Workflow (Active by Default):</strong> Snap photos on your phone, review the AI appraisal &amp; price range, copy the TSV row directly into Google Sheets (or download CSV), and paste ready-made Discogs/eBay listings whenever you sell.
+          </li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Content -->
+  <main class="max-w-5xl mx-auto px-4 py-5 space-y-6">
+    <!-- Session KPI Summary Strip -->
+    <section aria-label="Session summary" class="grid grid-cols-3 gap-2.5 sm:gap-4">
+      <div class="rounded-2xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 p-3.5 sm:p-4 shadow-sm">
+        <p class="text-[11px] sm:text-xs font-medium text-stone-500 dark:text-stone-400">Session Logged</p>
+        <p id="kpiCount" class="text-lg sm:text-2xl font-bold tabular-nums mt-0.5">0</p>
+      </div>
+      <div class="rounded-2xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 p-3.5 sm:p-4 shadow-sm">
+        <p class="text-[11px] sm:text-xs font-medium text-stone-500 dark:text-stone-400">Est. Range Sum</p>
+        <p id="kpiRange" class="text-sm sm:text-lg font-bold tabular-nums mt-1 truncate">$0–$0</p>
+      </div>
+      <div class="rounded-2xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 p-3.5 sm:p-4 shadow-sm">
+        <p class="text-[11px] sm:text-xs font-medium text-stone-500 dark:text-stone-400">Adjusted Value</p>
+        <p id="kpiTotal" class="text-lg sm:text-2xl font-bold text-emerald-700 dark:text-emerald-400 tabular-nums mt-0.5">$0</p>
+      </div>
+    </section>
+
+    <!-- Two-Column Desktop / Stacked Mobile Workspace -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <!-- Left Column: Camera Capture & Identification/Appraisal -->
+      <div class="lg:col-span-6 space-y-5">
+        <!-- Camera & Presets Card -->
+        <section class="rounded-2xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 p-4 sm:p-5 shadow-sm space-y-4">
+          <div class="flex items-center justify-between gap-2">
+            <h2 class="text-sm sm:text-base font-semibold">1. Snap or Upload Record Photo</h2>
+            <span class="text-[11px] text-stone-500 dark:text-stone-400">Front/Back + Label</span>
+          </div>
+
+          <!-- Mobile Camera Input -->
+          <label
+            for="photoInput"
+            class="flex flex-col items-center justify-center w-full p-4 sm:p-5 border-2 border-dashed border-stone-300 dark:border-stone-700 hover:border-amber-500 dark:hover:border-amber-500 rounded-2xl bg-stone-50/70 dark:bg-stone-950/60 cursor-pointer transition text-center"
+          >
+            <svg class="w-8 h-8 text-amber-600 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+            <span class="text-sm font-semibold">Take Photo or Choose Image</span>
+            <span class="text-xs text-stone-500 dark:text-stone-400 mt-0.5">Uses rear camera on phones • JPG, PNG, HEIC</span>
+            <input
+              id="photoInput"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              class="sr-only"
+            />
+          </label>
+
+          <!-- Live Preview -->
+          <div id="previewWrapper" class="hidden space-y-2.5">
+            <div class="relative rounded-2xl overflow-hidden border border-stone-200 dark:border-stone-800 bg-stone-950">
+              <img
+                id="photoPreview"
+                src=""
+                alt="Captured vinyl record and jacket preview"
+                class="w-full max-h-72 object-contain mx-auto"
+              />
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button
+                id="analyzePhotoBtn"
+                type="button"
+                class="flex-1 min-w-[160px] px-4 py-2.5 text-sm font-semibold rounded-xl bg-amber-600 hover:bg-amber-700 text-white transition shadow-sm flex items-center justify-center gap-2"
+              >
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.64 5.64l2.12 2.12m8.48 8.48l2.12 2.12M18.36 5.64l-2.12 2.12M7.76 16.24l-2.12 2.12" stroke-linecap="round" />
+                </svg>
+                <span id="analyzeBtnLabel">Identify &amp; Appraise Photo</span>
+              </button>
+              <button
+                id="clearPhotoBtn"
+                type="button"
+                class="px-3.5 py-2.5 text-xs sm:text-sm font-medium rounded-xl bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 transition"
+              >
+                Clear Photo
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Test Presets -->
+          <div class="pt-1">
+            <p class="text-xs font-medium text-stone-600 dark:text-stone-400 mb-2">Quick Test Presets (Offline / Instant Demo):</p>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                data-preset="jazz10"
+                class="preset-btn text-left p-2.5 rounded-xl bg-stone-50 hover:bg-amber-50 dark:bg-stone-800/70 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 transition"
+              >
+                <span class="block text-xs font-semibold text-stone-900 dark:text-stone-100">10" Jazz LP</span>
+                <span class="block text-[11px] text-stone-500 dark:text-stone-400 truncate">Prestige 135 • Mambo Jazz</span>
+              </button>
+              <button
+                type="button"
+                data-preset="signed"
+                class="preset-btn text-left p-2.5 rounded-xl bg-stone-50 hover:bg-amber-50 dark:bg-stone-800/70 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 transition"
+              >
+                <span class="block text-xs font-semibold text-stone-900 dark:text-stone-100">Autographed LP</span>
+                <span class="block text-[11px] text-stone-500 dark:text-stone-400 truncate">Billy Taylor • Signed</span>
+              </button>
+              <button
+                type="button"
+                data-preset="modern"
+                class="preset-btn text-left p-2.5 rounded-xl bg-stone-50 hover:bg-amber-50 dark:bg-stone-800/70 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 transition"
+              >
+                <span class="block text-xs font-semibold text-stone-900 dark:text-stone-100">Modern LP</span>
+                <span class="block text-[11px] text-stone-500 dark:text-stone-400 truncate">12" Reissue / Pressing</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Identification & Appraisal Form Card -->
+        <section class="rounded-2xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 p-4 sm:p-5 shadow-sm space-y-4">
+          <h2 class="text-sm sm:text-base font-semibold">2. Identification, Condition &amp; Price Range</h2>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label for="artistInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Artist</label>
+              <input
+                id="artistInput"
+                type="text"
+                placeholder="e.g. Sonny Stitt, Joe Holiday..."
+                class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            <div>
+              <label for="albumInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Album Title</label>
+              <input
+                id="albumInput"
+                type="text"
+                placeholder="e.g. Mambo Jazz"
+                class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            <div>
+              <label for="labelCatInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Label &amp; Catalog #</label>
+              <input
+                id="labelCatInput"
+                type="text"
+                placeholder="e.g. Prestige PRLP 135"
+                class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            <div>
+              <label for="formatYearInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Format / Year / Pressing</label>
+              <input
+                id="formatYearInput"
+                type="text"
+                placeholder='e.g. 10" Mono LP • 1952 US 1st'
+                class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          </div>
+
+          <!-- Price Range & Condition Grade -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label for="priceLowInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Est. Low ($)</label>
+              <input
+                id="priceLowInput"
+                type="number"
+                min="0"
+                step="1"
+                value="45"
+                class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 tabular-nums focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            <div>
+              <label for="priceHighInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Est. High ($)</label>
+              <input
+                id="priceHighInput"
+                type="number"
+                min="0"
+                step="1"
+                value="75"
+                class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 tabular-nums focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            <div>
+              <label for="conditionSelect" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Condition Grade</label>
+              <select
+                id="conditionSelect"
+                class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="NM">NM (Near Mint • 100%)</option>
+                <option value="VG+" selected>VG+ (Very Good Plus • 85%)</option>
+                <option value="VG">VG (Very Good • 65%)</option>
+                <option value="G+">G+ (Good Plus • 45%)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Defect Deductions & Autograph/Provenance Bonus -->
+          <div>
+            <p class="text-xs font-medium text-stone-700 dark:text-stone-300 mb-2">Defect Deductions &amp; Provenance Adjustments</p>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <label class="flex items-center gap-2 p-2.5 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 cursor-pointer">
+                <input id="defSeamSplit" type="checkbox" data-delta="-6" class="defect-chk rounded text-amber-600 focus:ring-amber-500" />
+                <span>Seam splits (-$6)</span>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 cursor-pointer">
+                <input id="defRingWear" type="checkbox" data-delta="-5" class="defect-chk rounded text-amber-600 focus:ring-amber-500" />
+                <span>Ring / scuff wear (-$5)</span>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 cursor-pointer">
+                <input id="defFoxing" type="checkbox" data-delta="-4" class="defect-chk rounded text-amber-600 focus:ring-amber-500" />
+                <span>Foxing / edge wear (-$4)</span>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 cursor-pointer">
+                <input id="defAutograph" type="checkbox" data-delta="25" class="defect-chk rounded text-emerald-600 focus:ring-emerald-500" />
+                <span>Autographed / provenance (+$25)</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Notes & Sales Status -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label for="notesInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Condition &amp; Provenance Notes</label>
+              <input
+                id="notesInput"
+                type="text"
+                placeholder="e.g. Light corner wear, glossy vinyl"
+                class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            <div>
+              <label for="salesStatusSelect" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Sales Status</label>
+              <select
+                id="salesStatusSelect"
+                class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="Keep / Audit">Keep / Audit</option>
+                <option value="For Sale - Discogs/eBay" selected>For Sale - Discogs/eBay</option>
+                <option value="DJ Crate (Not For Sale)">DJ Crate (Not For Sale)</option>
+                <option value="Listed">Listed</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Generated Drive Filename & Link -->
+          <div class="rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 p-3 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-medium text-stone-600 dark:text-stone-400">Drive Photo Filename</span>
+              <span id="driveFilenamePreview" class="text-xs font-mono text-stone-800 dark:text-stone-200 truncate"></span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <label for="driveLinkInput" class="text-xs font-medium text-stone-600 dark:text-stone-400 shrink-0">Drive Photo URL</label>
+              <input
+                id="driveLinkInput"
+                type="text"
+                class="w-full max-w-xs px-2.5 py-1 text-xs font-mono rounded-lg bg-white dark:bg-stone-900 border border-stone-300 dark:border-stone-700"
+              />
+            </div>
+          </div>
+
+          <!-- Valuation Summary Bar -->
+          <div class="rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 p-3.5 flex items-center justify-between gap-3">
+            <div>
+              <p class="text-xs text-amber-900 dark:text-amber-200 font-medium">Condition-Adjusted Valuation</p>
+              <p id="valuationBreakdown" class="text-[11px] text-amber-800/80 dark:text-amber-300/80 tabular-nums"></p>
+            </div>
+            <div class="text-right">
+              <p id="adjustedValueDisplay" class="text-2xl font-bold text-amber-900 dark:text-amber-300 tabular-nums">$51</p>
+              <p id="priceRangeDisplay" class="text-xs font-medium text-amber-800 dark:text-amber-400 tabular-nums">$45–$75 range</p>
+            </div>
+          </div>
+
+          <!-- Primary Action Buttons -->
+          <div class="flex flex-wrap gap-2.5">
+            <button
+              id="addToLogBtn"
+              type="button"
+              class="flex-1 min-w-[180px] px-4 py-3 text-sm font-semibold rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white transition shadow-sm"
+            >
+              + Add to Session &amp; Sheet Row
+            </button>
+            <button
+              id="syncDriveSheetBtn"
+              type="button"
+              class="px-4 py-3 text-sm font-medium rounded-xl bg-stone-800 hover:bg-stone-900 dark:bg-stone-700 dark:hover:bg-stone-600 text-white transition"
+            >
+              Upload / Sync
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <!-- Right Column: Spreadsheet Row, Sales Listing Generator & Session Log -->
+      <div class="lg:col-span-6 space-y-5">
+        <!-- Spreadsheet Entry & Sales Listing Generator -->
+        <section class="rounded-2xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 p-4 sm:p-5 shadow-sm space-y-4">
+          <div class="flex items-center justify-between gap-2">
+            <h2 class="text-sm sm:text-base font-semibold">3. Spreadsheet Row &amp; Sales Listing</h2>
+            <button
+              id="downloadCsvBtn"
+              type="button"
+              class="px-3 py-1.5 text-xs font-medium rounded-xl bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 border border-stone-300 dark:border-stone-700 transition"
+            >
+              Download CSV
+            </button>
+          </div>
+
+          <!-- TSV Row for Google Sheets -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label for="tsvRowOutput" class="text-xs font-medium text-stone-600 dark:text-stone-400">
+                Google Sheets Row (Tab-Separated)
+              </label>
+              <button
+                id="copyTsvBtn"
+                type="button"
+                class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 dark:bg-amber-900/50 dark:hover:bg-amber-900 dark:text-amber-200 transition"
+              >
+                Copy Row for Sheets
+              </button>
+            </div>
+            <textarea
+              id="tsvRowOutput"
+              rows="2"
+              readonly
+              class="w-full p-2.5 text-xs font-mono rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800"
+            ></textarea>
+          </div>
+
+          <!-- Sales Listing Generator -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between gap-2">
+              <label for="listingOutput" class="text-xs font-medium text-stone-600 dark:text-stone-400">
+                Discogs / eBay / Marketplace Listing Draft
+              </label>
+              <div class="flex items-center gap-1.5">
+                <select
+                  id="listingChannelSelect"
+                  class="px-2 py-1 text-xs rounded-lg bg-stone-100 dark:bg-stone-800 border border-stone-300 dark:border-stone-700"
+                >
+                  <option value="discogs">Discogs / Collector</option>
+                  <option value="ebay">eBay Listing</option>
+                  <option value="local">Local / Marketplace</option>
+                </select>
+                <button
+                  id="copyListingBtn"
+                  type="button"
+                  class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-stone-800 hover:bg-stone-900 dark:bg-stone-700 dark:hover:bg-stone-600 text-white transition"
+                >
+                  Copy Listing
+                </button>
+              </div>
+            </div>
+            <textarea
+              id="listingOutput"
+              rows="6"
+              class="w-full p-3 text-xs sm:text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-amber-500"
+            ></textarea>
+          </div>
+        </section>
+
+        <!-- Local Session Log -->
+        <section class="rounded-2xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 p-4 sm:p-5 shadow-sm space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <h2 class="text-sm sm:text-base font-semibold">4. Session Log</h2>
+              <p class="text-xs text-stone-500 dark:text-stone-400">Saved locally in browser storage</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                id="copyAllTsvBtn"
+                type="button"
+                class="px-2.5 py-1.5 text-xs font-medium rounded-xl bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 transition"
+              >
+                Copy All Rows
+              </button>
+              <button
+                id="clearSessionBtn"
+                type="button"
+                class="px-2.5 py-1.5 text-xs font-medium rounded-xl text-red-700 dark:text-red-400 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-950/70 transition"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+          <div id="sessionLogList" class="space-y-2.5 max-h-96 overflow-y-auto pr-0.5">
+            <p id="emptySessionMsg" class="text-xs text-stone-500 dark:text-stone-400 py-6 text-center border border-dashed border-stone-200 dark:border-stone-800 rounded-xl">
+              No records logged in this session yet. Use a preset or snap a photo to add your first entry.
+            </p>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    /**
+     * CrateSnap Audit — Vinyl & Record Cataloger
+     * Handles camera/file capture, AI appraisal via Gemini API with exponential backoff,
+     * condition & defect pricing adjustments, Google Drive naming/linking, TSV/CSV export,
+     * sales listing formatting, and localStorage session persistence.
+     */
+    (function () {
+      const STORAGE_KEYS = {
+        records: 'cratesnap_session_records_v1',
+        config: 'cratesnap_drive_sheet_config_v1',
+        theme: 'cratesnap_theme_v1',
+      };
+
+      // Quick test presets so users can test immediately on mobile or desktop
+      const PRESETS = {
+        jazz10: {
+          artist: 'Sonny Stitt, Joe Holiday, Kenny Graham, Sonny Rollins',
+          album: 'Mambo Jazz',
+          labelCat: 'Prestige PRLP 135',
+          formatYear: '10" Mono LP • 1952 US 1st',
+          priceLow: 45,
+          priceHigh: 75,
+          condition: 'VG+',
+          seamSplit: false,
+          ringWear: true,
+          foxing: true,
+          autograph: false,
+          notes: 'Light edge/corner wear, glossy vinyl, clean labels',
+          salesStatus: 'For Sale - Discogs/eBay',
+          fileId: '1DriveSampleOriginalPressing001',
+        },
+        signed: {
+          artist: 'Billy Taylor Trio',
+          album: 'Billy Taylor Plays for D.J.\'s',
+          labelCat: 'Prestige LP 184',
+          formatYear: '10" Mono LP • 1954 US 1st',
+          priceLow: 55,
+          priceHigh: 90,
+          condition: 'VG+',
+          seamSplit: false,
+          ringWear: false,
+          foxing: true,
+          autograph: true,
+          notes: 'Signed & inscribed by Billy Taylor on back slick',
+          salesStatus: 'Keep / Audit',
+          fileId: '1DriveSampleSignedCopy001',
+        },
+        modern: {
+          artist: 'Eric Dolphy',
+          album: 'Out to Lunch!',
+          labelCat: 'Blue Note BST 84163',
+          formatYear: '12" LP • Stereo Pressing',
+          priceLow: 35,
+          priceHigh: 65,
+          condition: 'NM',
+          seamSplit: false,
+          ringWear: false,
+          foxing: false,
+          autograph: false,
+          notes: 'Clean cover and vinyl, minimal handling',
+          salesStatus: 'For Sale - Discogs/eBay',
+          fileId: '1DriveSampleModernPressing001',
+        },
+      };
+
+      const GRADE_MULTIPLIERS = {
+        NM: 1.0,
+        'VG+': 0.85,
+        VG: 0.65,
+        'G+': 0.45,
+      };
+
+      const AUDIT_HEADERS = [
+        'Artist',
+        'Album',
+        'Label/Catalog',
+        'Year/Format',
+        'Condition',
+        'Price Range',
+        'Adjusted Value',
+        'Photo Link',
+        'Sales Status/Notes',
+      ];
+
+      // DOM References
+      const el = {
+        toggleConnectBtn: document.getElementById('toggleConnectBtn'),
+        closeDrawerBtn: document.getElementById('closeDrawerBtn'),
+        connectDrawer: document.getElementById('connectDrawer'),
+        connectBadge: document.getElementById('connectBadge'),
+        driveFolderId: document.getElementById('driveFolderId'),
+        sheetUrlInput: document.getElementById('sheetUrlInput'),
+        googleClientId: document.getElementById('googleClientId'),
+        appsScriptWebhook: document.getElementById('appsScriptWebhook'),
+        saveConnectBtn: document.getElementById('saveConnectBtn'),
+        connectSavedHint: document.getElementById('connectSavedHint'),
+        themeToggleBtn: document.getElementById('themeToggleBtn'),
+        statusBanner: document.getElementById('statusBanner'),
+        statusBannerInner: document.getElementById('statusBannerInner'),
+        statusBannerText: document.getElementById('statusBannerText'),
+        dismissBannerBtn: document.getElementById('dismissBannerBtn'),
+        kpiCount: document.getElementById('kpiCount'),
+        kpiRange: document.getElementById('kpiRange'),
+        kpiTotal: document.getElementById('kpiTotal'),
+        photoInput: document.getElementById('photoInput'),
+        previewWrapper: document.getElementById('previewWrapper'),
+        photoPreview: document.getElementById('photoPreview'),
+        analyzePhotoBtn: document.getElementById('analyzePhotoBtn'),
+        analyzeBtnLabel: document.getElementById('analyzeBtnLabel'),
+        clearPhotoBtn: document.getElementById('clearPhotoBtn'),
+        artistInput: document.getElementById('artistInput'),
+        albumInput: document.getElementById('albumInput'),
+        labelCatInput: document.getElementById('labelCatInput'),
+        formatYearInput: document.getElementById('formatYearInput'),
+        priceLowInput: document.getElementById('priceLowInput'),
+        priceHighInput: document.getElementById('priceHighInput'),
+        conditionSelect: document.getElementById('conditionSelect'),
+        defSeamSplit: document.getElementById('defSeamSplit'),
+        defRingWear: document.getElementById('defRingWear'),
+        defFoxing: document.getElementById('defFoxing'),
+        defAutograph: document.getElementById('defAutograph'),
+        notesInput: document.getElementById('notesInput'),
+        salesStatusSelect: document.getElementById('salesStatusSelect'),
+        driveFilenamePreview: document.getElementById('driveFilenamePreview'),
+        driveLinkInput: document.getElementById('driveLinkInput'),
+        valuationBreakdown: document.getElementById('valuationBreakdown'),
+        adjustedValueDisplay: document.getElementById('adjustedValueDisplay'),
+        priceRangeDisplay: document.getElementById('priceRangeDisplay'),
+        addToLogBtn: document.getElementById('addToLogBtn'),
+        syncDriveSheetBtn: document.getElementById('syncDriveSheetBtn'),
+        downloadCsvBtn: document.getElementById('downloadCsvBtn'),
+        copyTsvBtn: document.getElementById('copyTsvBtn'),
+        tsvRowOutput: document.getElementById('tsvRowOutput'),
+        listingChannelSelect: document.getElementById('listingChannelSelect'),
+        copyListingBtn: document.getElementById('copyListingBtn'),
+        listingOutput: document.getElementById('listingOutput'),
+        copyAllTsvBtn: document.getElementById('copyAllTsvBtn'),
+        clearSessionBtn: document.getElementById('clearSessionBtn'),
+        sessionLogList: document.getElementById('sessionLogList'),
+        emptySessionMsg: document.getElementById('emptySessionMsg'),
+      };
+
+      let currentImageBase64 = null;
+      let currentImageMime = 'image/jpeg';
+      let currentGeneratedFileId = null;
+      let sessionRecords = loadRecords();
+      let connectConfig = loadConfig();
+
+      // --- Banner / Notification Helper (No alert/confirm) ---
+      function showBanner(message, type = 'info') {
+        const styles = {
+          info: 'bg-stone-100 text-stone-900 border-stone-300 dark:bg-stone-800 dark:text-stone-100 dark:border-stone-700',
+          success: 'bg-emerald-50 text-emerald-900 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-800',
+          warn: 'bg-amber-50 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-800',
+          error: 'bg-red-50 text-red-900 border-red-300 dark:bg-red-950/60 dark:text-red-200 dark:border-red-800',
+        };
+        el.statusBannerInner.className = `rounded-2xl px-4 py-3 text-xs sm:text-sm font-medium flex items-center justify-between gap-3 border ${styles[type] || styles.info}`;
+        el.statusBannerText.textContent = message;
+        el.statusBanner.classList.remove('hidden');
+      }
+
+      function hideBanner() {
+        el.statusBanner.classList.add('hidden');
+      }
+
+      // --- Theme Management ---
+      function initTheme() {
+        const saved = localStorage.getItem(STORAGE_KEYS.theme);
+        const prefersDark = window.matchMedia && window.matchMedia('(prefers-dark-scheme: dark)').matches;
+        if (saved === 'dark' || (!saved && prefersDark)) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      }
+
+      el.themeToggleBtn.addEventListener('click', () => {
+        const isDark = document.documentElement.classList.toggle('dark');
+        localStorage.setItem(STORAGE_KEYS.theme, isDark ? 'dark' : 'light');
+      });
+
+      // --- Storage Helpers ---
+      function loadRecords() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEYS.records);
+          const parsed = raw ? JSON.parse(raw) : [];
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (err) {
+          return [];
+        }
+      }
+
+      function saveRecords() {
+        try {
+          localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(sessionRecords));
+        } catch (err) {
+          showBanner('Could not save session log to browser storage.', 'warn');
+        }
+      }
+
+      function loadConfig() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEYS.config);
+          return raw ? JSON.parse(raw) : {};
+        } catch (err) {
+          return {};
+        }
+      }
+
+      function saveConfig() {
+        connectConfig = {
+          driveFolderId: el.driveFolderId.value.trim(),
+          sheetUrl: el.sheetUrlInput.value.trim(),
+          googleClientId: el.googleClientId.value.trim(),
+          appsScriptWebhook: el.appsScriptWebhook.value.trim(),
+        };
+        try {
+          localStorage.setItem(STORAGE_KEYS.config, JSON.stringify(connectConfig));
+          updateConnectBadge();
+          el.connectSavedHint.textContent = 'Settings saved locally.';
+          showBanner('Google Drive & Sheets connection settings saved.', 'success');
+        } catch (err) {
+          showBanner('Unable to save connection settings.', 'error');
+        }
+      }
+
+      function updateConnectBadge() {
+        const configured = Boolean(connectConfig.appsScriptWebhook || (connectConfig.driveFolderId && connectConfig.googleClientId));
+        el.connectBadge.className = configured
+          ? 'inline-block w-2 h-2 rounded-full bg-emerald-500'
+          : 'inline-block w-2 h-2 rounded-full bg-amber-500';
+      }
+
+      // --- Drive Naming & Link Generation ---
+      function sanitizePart(str) {
+        return (str || 'Unknown')
+          .trim()
+          .replace(/[^a-zA-Z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '')
+          .slice(0, 48) || 'Item';
+      }
+
+      function buildDriveFilename() {
+        const artist = sanitizePart(el.artistInput.value);
+        const album = sanitizePart(el.albumInput.value);
+        const cat = sanitizePart(el.labelCatInput.value);
+        return `${artist}_${album}_${cat}.jpg`;
+      }
+
+      function makeMockDriveId(seedText) {
+        let hash = 0;
+        for (let i = 0; i < seedText.length; i++) {
+          hash = ((hash << 5) - hash) + seedText.charCodeAt(i);
+          hash |= 0;
+        }
+        const suffix = Math.abs(hash).toString(36).padStart(8, '0').slice(0, 8);
+        return `1CrateSnap${suffix}DriveFile`;
+      }
+
+      function syncDriveFields(forceNewLink = false) {
+        const filename = buildDriveFilename();
+        el.driveFilenamePreview.textContent = filename;
+        if (forceNewLink || !el.driveLinkInput.value.trim()) {
+          const id = currentGeneratedFileId || makeMockDriveId(`${filename}_${Date.now()}`);
+          currentGeneratedFileId = id;
+          el.driveLinkInput.value = `https://drive.google.com/file/d/${id}/view?usp=drivesdk`;
+        }
+      }
+
+      // --- Valuation & Output Computation ---
+      function computeAppraisal() {
+        const low = Math.max(0, Number(el.priceLowInput.value) || 0);
+        const high = Math.max(low, Number(el.priceHighInput.value) || low);
+        const grade = el.conditionSelect.value;
+        const mult = GRADE_MULTIPLIERS[grade] ?? 0.85;
+
+        // Midpoint baseline scaled by condition grade, then defect/autograph adjustments applied
+        const midpoint = (low + high) / 2;
+        const gradedBase = midpoint * mult;
+
+        let adjustmentDelta = 0;
+        const appliedMods = [];
+        document.querySelectorAll('.defect-chk').forEach((chk) => {
+          if (chk.checked) {
+            const delta = Number(chk.dataset.delta) || 0;
+            adjustmentDelta += delta;
+            appliedMods.push(chk.parentElement.textContent.trim());
+          }
+        });
+
+        const adjustedValue = Math.max(1, Math.round(gradedBase + adjustmentDelta));
+
+        el.priceRangeDisplay.textContent = `$${low}–$${high} range`;
+        el.adjustedValueDisplay.textContent = `$${adjustedValue}`;
+        el.valuationBreakdown.textContent =
+          `Mid $${Math.round(midpoint)} × ${grade} (${Math.round(mult * 100)}%)` +
+          (adjustmentDelta !== 0 ? ` ${adjustmentDelta > 0 ? '+' : ''}$${adjustmentDelta}` : '');
+
+        return {
+          artist: el.artistInput.value.trim() || 'Unknown Artist',
+          album: el.albumInput.value.trim() || 'Untitled LP',
+          labelCat: el.labelCatInput.value.trim() || 'Unlabeled',
+          formatYear: el.formatYearInput.value.trim() || 'LP',
+          condition: grade,
+          priceLow: low,
+          priceHigh: high,
+          priceRange: `$${low}–$${high}`,
+          adjustedValue,
+          photoFilename: buildDriveFilename(),
+          photoLink: el.driveLinkInput.value.trim(),
+          salesStatus: el.salesStatusSelect.value,
+          notes: el.notesInput.value.trim(),
+          appliedMods,
+        };
+      }
+
+      function formatStatusNotes(data) {
+        const parts = [];
+        if (data.salesStatus) parts.push(`[${data.salesStatus}]`);
+        if (data.appliedMods.length) parts.push(data.appliedMods.join(', '));
+        if (data.notes) parts.push(data.notes);
+        return parts.join(' — ') || data.salesStatus;
+      }
+
+      function toTsvRow(data) {
+        const combinedNotes = formatStatusNotes(data);
+        const cells = [
+          data.artist,
+          data.album,
+          data.labelCat,
+          data.formatYear,
+          data.condition,
+          data.priceRange,
+          `$${data.adjustedValue}`,
+          data.photoLink,
+          combinedNotes,
+        ];
+        return cells.map((c) => String(c).replace(/[\t\r\n]+/g, ' ')).join('\t');
+      }
+
+      function buildSalesListing(data, channel) {
+        const notesLine = formatStatusNotes(data);
+        const photoLine = data.photoLink ? `Photo: ${data.photoLink}` : `Photo File: ${data.photoFilename}`;
+
+        if (channel === 'ebay') {
+          return [
+            `${data.artist} - ${data.album} (${data.labelCat}) [${data.condition}]`,
+            `Format/Pressing: ${data.formatYear}`,
+            `Condition & Notes: ${notesLine}`,
+            `Asking / Est. Value: $${data.adjustedValue} (Market range: ${data.priceRange})`,
+            `Packed securely in a record mailer with inner/outer sleeves. ${photoLine}`,
+          ].join('\n');
+        }
+
+        if (channel === 'local') {
+          return [
+            `${data.artist} — "${data.album}" (${data.labelCat})`,
+            `Grade: ${data.condition} • $${data.adjustedValue} (Est. ${data.priceRange})`,
+            `Notes: ${notesLine}`,
+            photoLine,
+          ].join('\n');
+        }
+
+        // Default: Discogs / Collector style
+        return [
+          `${data.artist} – ${data.album}`,
+          `Label / Catalog: ${data.labelCat} | Format: ${data.formatYear}`,
+          `Media/Sleeve Condition: ${data.condition} | Valuation: $${data.adjustedValue} (Typical range: ${data.priceRange})`,
+          `Notes: ${notesLine}`,
+          photoLine,
+        ].join('\n');
+      }
+
+      function refreshOutputs() {
+        const data = computeAppraisal();
+        el.tsvRowOutput.value = toTsvRow(data);
+        el.listingOutput.value = buildSalesListing(data, el.listingChannelSelect.value);
+      }
+
+      // --- Apply Preset ---
+      function applyPreset(key) {
+        const p = PRESETS[key];
+        if (!p) return;
+        currentGeneratedFileId = p.fileId;
+        el.artistInput.value = p.artist;
+        el.albumInput.value = p.album;
+        el.labelCatInput.value = p.labelCat;
+        el.formatYearInput.value = p.formatYear;
+        el.priceLowInput.value = p.priceLow;
+        el.priceHighInput.value = p.priceHigh;
+        el.conditionSelect.value = p.condition;
+        el.defSeamSplit.checked = p.seamSplit;
+        el.defRingWear.checked = p.ringWear;
+        el.defFoxing.checked = p.foxing;
+        el.defAutograph.checked = p.autograph;
+        el.notesInput.value = p.notes;
+        el.salesStatusSelect.value = p.salesStatus;
+        syncDriveFields(true);
+        refreshOutputs();
+        showBanner(`Loaded "${p.album}" preset. Ready to log or tweak.`, 'info');
+      }
+
+      // --- Photo Input & Gemini Appraisal ---
+      el.photoInput.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        currentImageMime = file.type || 'image/jpeg';
+
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = String(reader.result || '');
+          el.photoPreview.src = dataUrl;
+          el.previewWrapper.classList.remove('hidden');
+          const commaIdx = dataUrl.indexOf(',');
+          currentImageBase64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : null;
+          currentGeneratedFileId = makeMockDriveId(`${file.name}_${Date.now()}`);
+          syncDriveFields(true);
+          showBanner(`Photo loaded (${file.name}). Tap "Identify & Appraise Photo" to analyze.`, 'info');
+        };
+        reader.onerror = () => {
+          showBanner('Could not read the selected image file.', 'error');
+        };
+        reader.readAsDataURL(file);
+      });
+
+      el.clearPhotoBtn.addEventListener('click', () => {
+        currentImageBase64 = null;
+        el.photoInput.value = '';
+        el.photoPreview.src = '';
+        el.previewWrapper.classList.add('hidden');
+        showBanner('Cleared photo preview.', 'info');
+      });
+
+      async function fetchWithBackoff(url, options, maxRetries = 3) {
+        let delay = 1000;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          const response = await fetch(url, options);
+          if (response.status !== 429 && response.status < 500) {
+            return response;
+          }
+          if (attempt < maxRetries) {
+            await new Promise((r) => setTimeout(r, delay));
+            delay *= 2;
+          } else {
+            return response;
+          }
+        }
+      }
+
+      async function analyzePhotoWithGemini() {
+        if (!currentImageBase64) {
+          showBanner('Please capture or upload a record photo first.', 'warn');
+          return;
+        }
+
+        el.analyzePhotoBtn.disabled = true;
+        el.analyzeBtnLabel.textContent = 'Analyzing...';
+
+        try {
+          const apiKey = '';
+          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+          const prompt = [
+            'Identify this vinyl record and jacket from the photo.',
+            'Return a JSON object with keys:',
+            'artist, album, labelCat, formatYear, priceLow (number), priceHigh (number), condition (one of NM, VG+, VG, G+), seamSplit (boolean), ringWear (boolean), foxing (boolean), autograph (boolean), notes (string).',
+            'Base priceLow and priceHigh in USD for typical collector market value.',
+          ].join(' ');
+
+          const payload = {
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType: currentImageMime,
+                      data: currentImageBase64,
+                    },
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: 'OBJECT',
+                properties: {
+                  artist: { type: 'STRING' },
+                  album: { type: 'STRING' },
+                  labelCat: { type: 'STRING' },
+                  formatYear: { type: 'STRING' },
+                  priceLow: { type: 'NUMBER' },
+                  priceHigh: { type: 'NUMBER' },
+                  condition: { type: 'STRING' },
+                  seamSplit: { type: 'BOOLEAN' },
+                  ringWear: { type: 'BOOLEAN' },
+                  foxing: { type: 'BOOLEAN' },
+                  autograph: { type: 'BOOLEAN' },
+                  notes: { type: 'STRING' },
+                },
+                propertyOrdering: [
+                  'artist',
+                  'album',
+                  'labelCat',
+                  'formatYear',
+                  'priceLow',
+                  'priceHigh',
+                  'condition',
+                  'seamSplit',
+                  'ringWear',
+                  'foxing',
+                  'autograph',
+                  'notes',
+                ],
+              },
+            },
+          };
+
+          const response = await fetchWithBackoff(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            throw new Error(`API status ${response.status}`);
+          }
+
+          const result = await response.json();
+          const rawText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!rawText) {
+            throw new Error('Empty response from model');
+          }
+
+          const parsed = JSON.parse(rawText);
+          if (parsed.artist) el.artistInput.value = parsed.artist;
+          if (parsed.album) el.albumInput.value = parsed.album;
+          if (parsed.labelCat) el.labelCatInput.value = parsed.labelCat;
+          if (parsed.formatYear) el.formatYearInput.value = parsed.formatYear;
+          if (typeof parsed.priceLow === 'number') el.priceLowInput.value = Math.max(1, Math.round(parsed.priceLow));
+          if (typeof parsed.priceHigh === 'number') el.priceHighInput.value = Math.max(1, Math.round(parsed.priceHigh));
+          if (parsed.condition && GRADE_MULTIPLIERS[parsed.condition]) {
+            el.conditionSelect.value = parsed.condition;
+          }
+          el.defSeamSplit.checked = Boolean(parsed.seamSplit);
+          el.defRingWear.checked = Boolean(parsed.ringWear);
+          el.defFoxing.checked = Boolean(parsed.foxing);
+          el.defAutograph.checked = Boolean(parsed.autograph);
+          if (parsed.notes) el.notesInput.value = parsed.notes;
+
+          syncDriveFields(true);
+          refreshOutputs();
+          showBanner('Photo appraised! Review fields and add to your session log.', 'success');
+        } catch (err) {
+          syncDriveFields(false);
+          refreshOutputs();
+          showBanner('Could not run live AI appraisal here—fill or pick a preset and calculate value manually.', 'warn');
+        } finally {
+          el.analyzePhotoBtn.disabled = false;
+          el.analyzeBtnLabel.textContent = 'Identify & Appraise Photo';
+        }
+      }
+
+      el.analyzePhotoBtn.addEventListener('click', analyzePhotoWithGemini);
+
+      // --- Optional Webhook / Drive Sync ---
+      el.syncDriveSheetBtn.addEventListener('click', async () => {
+        const data = computeAppraisal();
+        if (!connectConfig.appsScriptWebhook) {
+          showBanner('No Apps Script webhook configured. Use "Copy Row for Sheets" or open "Drive & Sheets" to add your webhook.', 'info');
+          return;
+        }
+        try {
+          await fetch(connectConfig.appsScriptWebhook, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...data,
+              tsvRow: toTsvRow(data),
+              sheetUrl: connectConfig.sheetUrl || '',
+              driveFolderId: connectConfig.driveFolderId || '',
+              imageBase64: currentImageBase64 || null,
+              imageMime: currentImageMime,
+            }),
+          });
+          showBanner(`Sent "${data.album}" payload to your Apps Script webhook.`, 'success');
+        } catch (err) {
+          showBanner('Webhook request failed. Check your URL or copy the TSV row manually.', 'error');
+        }
+      });
+
+      // --- Session Log Management ---
+      function renderSessionLog() {
+        const count = sessionRecords.length;
+        let sumLow = 0;
+        let sumHigh = 0;
+        let sumAdjusted = 0;
+
+        sessionRecords.forEach((rec) => {
+          sumLow += Number(rec.priceLow) || 0;
+          sumHigh += Number(rec.priceHigh) || 0;
+          sumAdjusted += Number(rec.adjustedValue) || 0;
+        });
+
+        el.kpiCount.textContent = String(count);
+        el.kpiRange.textContent = `$${sumLow}–$${sumHigh}`;
+        el.kpiTotal.textContent = `$${sumAdjusted}`;
+
+        if (count === 0) {
+          el.sessionLogList.innerHTML = '';
+          el.sessionLogList.appendChild(el.emptySessionMsg);
+          el.emptySessionMsg.classList.remove('hidden');
+          return;
+        }
+
+        el.emptySessionMsg.classList.add('hidden');
+        el.sessionLogList.innerHTML = sessionRecords
+          .map(
+            (rec, idx) => `
+            <div class="p-3 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 flex items-start justify-between gap-3">
+              <div class="min-w-0 space-y-0.5">
+                <p class="text-xs sm:text-sm font-semibold truncate">${escapeHtml(rec.artist)} — ${escapeHtml(rec.album)}</p>
+                <p class="text-[11px] text-stone-500 dark:text-stone-400 truncate">${escapeHtml(rec.labelCat)} • ${escapeHtml(rec.condition)} • Range ${escapeHtml(rec.priceRange)}</p>
+                <p class="text-[11px] font-mono text-amber-700 dark:text-amber-400 truncate">${escapeHtml(rec.photoFilename)}</p>
+              </div>
+              <div class="text-right shrink-0 space-y-1">
+                <p class="text-sm font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">$${Number(rec.adjustedValue) || 0}</p>
+                <button
+                  type="button"
+                  data-remove-idx="${idx}"
+                  class="remove-rec-btn text-[11px] text-stone-500 hover:text-red-600 dark:hover:text-red-400 underline"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          `
+          )
+          .join('');
+
+        el.sessionLogList.querySelectorAll('.remove-rec-btn').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const idx = Number(btn.dataset.removeIdx);
+            if (!Number.isNaN(idx)) {
+              sessionRecords.splice(idx, 1);
+              saveRecords();
+              renderSessionLog();
+              showBanner('Removed entry from session log.', 'info');
+            }
+          });
+        });
+      }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      el.addToLogBtn.addEventListener('click', () => {
+        const data = computeAppraisal();
+        const entry = {
+          ...data,
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          loggedAt: new Date().toISOString(),
+        };
+        sessionRecords.unshift(entry);
+        saveRecords();
+        renderSessionLog();
+
+        // Prepare fresh Drive file ID for next record while keeping current fields visible
+        currentGeneratedFileId = null;
+        syncDriveFields(true);
+        refreshOutputs();
+        showBanner(`Added "${entry.album}" ($${entry.adjustedValue}) to session log.`, 'success');
+      });
+
+      el.clearSessionBtn.addEventListener('click', () => {
+        sessionRecords = [];
+        saveRecords();
+        renderSessionLog();
+        showBanner('Session log cleared.', 'info');
+      });
+
+      // --- Clipboard & CSV Export ---
+      function copyTextToClipboard(text, successMsg) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try {
+          ok = document.execCommand('copy');
+        } catch (err) {
+          ok = false;
+        }
+        document.body.removeChild(ta);
+        if (ok) {
+          showBanner(successMsg, 'success');
+        } else {
+          showBanner('Select and copy the text directly from the box.', 'warn');
+        }
+      }
+
+      el.copyTsvBtn.addEventListener('click', () => {
+        copyTextToClipboard(el.tsvRowOutput.value, 'Copied tab-separated row for Google Sheets.');
+      });
+
+      el.copyAllTsvBtn.addEventListener('click', () => {
+        if (!sessionRecords.length) {
+          showBanner('Session log is empty.', 'warn');
+          return;
+        }
+        const lines = sessionRecords.map((r) => toTsvRow(r));
+        copyTextToClipboard(lines.join('\n'), `Copied ${lines.length} rows for Google Sheets.`);
+      });
+
+      el.copyListingBtn.addEventListener('click', () => {
+        copyTextToClipboard(el.listingOutput.value, 'Copied sales listing draft.');
+      });
+
+      function csvEscape(val) {
+        const s = String(val ?? '').replace(/"/g, '""');
+        return `"${s}"`;
+      }
+
+      el.downloadCsvBtn.addEventListener('click', () => {
+        const rowsToExport = sessionRecords.length ? sessionRecords : [computeAppraisal()];
+        const csvLines = [
+          AUDIT_HEADERS.map(csvEscape).join(','),
+          ...rowsToExport.map((r) =>
+            [
+              r.artist,
+              r.album,
+              r.labelCat,
+              r.formatYear,
+              r.condition,
+              r.priceRange,
+              `$${r.adjustedValue}`,
+              r.photoLink,
+              formatStatusNotes(r),
+            ]
+              .map(csvEscape)
+              .join(',')
+          ),
+        ];
+        const blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `cratesnap_audit_${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showBanner(`Downloaded CSV with ${rowsToExport.length} record(s).`, 'success');
+      });
+
+      // --- Event Bindings ---
+      el.toggleConnectBtn.addEventListener('click', () => {
+        el.connectDrawer.classList.toggle('hidden');
+      });
+      el.closeDrawerBtn.addEventListener('click', () => {
+        el.connectDrawer.classList.add('hidden');
+      });
+      el.dismissBannerBtn.addEventListener('click', hideBanner);
+      el.saveConnectBtn.addEventListener('click', saveConfig);
+
+      document.querySelectorAll('.preset-btn').forEach((btn) => {
+        btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+      });
+
+      [
+        el.artistInput,
+        el.albumInput,
+        el.labelCatInput,
+        el.formatYearInput,
+      ].forEach((input) => {
+        input.addEventListener('input', () => {
+          syncDriveFields(false);
+          refreshOutputs();
+        });
+      });
+
+      [
+        el.priceLowInput,
+        el.priceHighInput,
+        el.conditionSelect,
+        el.defSeamSplit,
+        el.defRingWear,
+        el.defFoxing,
+        el.defAutograph,
+        el.notesInput,
+        el.salesStatusSelect,
+        el.driveLinkInput,
+        el.listingChannelSelect,
+      ].forEach((ctrl) => {
+        ctrl.addEventListener('input', refreshOutputs);
+        ctrl.addEventListener('change', refreshOutputs);
+      });
+
+      // --- Initialization ---
+      initTheme();
+      el.driveFolderId.value = connectConfig.driveFolderId || '';
+      el.sheetUrlInput.value = connectConfig.sheetUrl || '';
+      el.googleClientId.value = connectConfig.googleClientId || '';
+      el.appsScriptWebhook.value = connectConfig.appsScriptWebhook || '';
+      updateConnectBadge();
+
+      applyPreset('jazz10');
+      renderSessionLog();
+    })();
+  </script>
+</body>
+</html>

@@ -1141,6 +1141,22 @@
       let pendingToken = null;
       let forceConsent = false; // re-show Google's permission screen next tap
 
+      // Keep the (1-hour) Google sign-in across page reloads in this tab only.
+      const TOKEN_KEY = 'cratesnap_google_token_v1';
+      function rememberToken() {
+        try { sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ t: accessToken, exp: accessTokenExpiresAt, cid: connectConfig.googleClientId })); } catch (e) { /* ignore */ }
+      }
+      function forgetToken() {
+        try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignore */ }
+      }
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(TOKEN_KEY) || 'null');
+        if (saved && saved.t && saved.exp > Date.now() && saved.cid === connectConfig.googleClientId) {
+          accessToken = saved.t;
+          accessTokenExpiresAt = saved.exp;
+        }
+      } catch (e) { /* ignore */ }
+
       function loadGis() {
         if (window.google && window.google.accounts && window.google.accounts.oauth2) return Promise.resolve();
         if (!gisLoadPromise) {
@@ -1163,8 +1179,8 @@
         const clientId = connectConfig.googleClientId;
         if (!clientId || !(window.google && window.google.accounts && window.google.accounts.oauth2)) return false;
         if (tokenClient && tokenClientId === clientId) return true;
+        if (tokenClientId && tokenClientId !== clientId) { accessToken = null; forgetToken(); }
         tokenClientId = clientId;
-        accessToken = null;
         tokenClient = window.google.accounts.oauth2.initTokenClient({
           client_id: clientId,
           scope: GOOGLE_SCOPES,
@@ -1172,6 +1188,7 @@
             const p = pendingToken;
             pendingToken = null;
             if (!p) return;
+            clearTimeout(p.timer);
             if (resp && resp.access_token) {
               // Google's consent screen has a checkbox per permission; a box
               // left unticked gives a token that can't touch Sheets (403).
@@ -1186,6 +1203,7 @@
               forceConsent = false;
               accessToken = resp.access_token;
               accessTokenExpiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000 - 60000;
+              rememberToken();
               p.resolve(accessToken);
             } else {
               const code = resp && resp.error;
@@ -1196,8 +1214,25 @@
           },
           error_callback: (err) => {
             const p = pendingToken;
+            if (!p) return;
+            if (err && err.type === 'popup_closed') {
+              // iPhone Safari often reports the window as closed while sign-in
+              // is still finishing; keep waiting so a late answer still counts.
+              showBanner('Waiting for Google sign-in… If you closed the Google window, tap "Save to Sheet & Drive" again.', 'info');
+              clearTimeout(p.timer);
+              p.timer = setTimeout(() => {
+                if (pendingToken === p) {
+                  pendingToken = null;
+                  p.reject(new Error('Google sign-in didn\'t finish. Tap "Save to Sheet & Drive" again and complete the Google screen.'));
+                }
+              }, 120000);
+              return;
+            }
             pendingToken = null;
-            if (p) p.reject(new Error(err && err.type === 'popup_closed' ? 'Google sign-in was closed.' : 'Google sign-in was blocked or failed.'));
+            clearTimeout(p.timer);
+            p.reject(new Error(err && err.type === 'popup_failed_to_open'
+              ? 'The Google sign-in window was blocked. On iPhone: Settings → Apps → Safari → turn off "Block Pop-ups", then tap Save again.'
+              : 'Google sign-in was blocked or failed. Tap Save again.'));
           },
         });
         return true;
@@ -1219,7 +1254,15 @@
           });
         }
         return new Promise((resolve, reject) => {
-          pendingToken = { resolve, reject };
+          if (pendingToken) {
+            // A newer tap replaces the one still waiting; the old one bows out quietly.
+            clearTimeout(pendingToken.timer);
+            const old = pendingToken;
+            const quiet = new Error('superseded');
+            quiet.silent = true;
+            old.reject(quiet);
+          }
+          pendingToken = { resolve, reject, timer: null };
           tokenClient.requestAccessToken({ prompt: forceConsent ? 'consent' : '' });
         });
       }
@@ -1229,7 +1272,7 @@
           ...options,
           headers: { ...(options.headers || {}), Authorization: `Bearer ${accessToken}` },
         });
-        if (res.status === 401) accessToken = null;
+        if (res.status === 401) { accessToken = null; forgetToken(); }
         return res;
       }
 
@@ -1317,6 +1360,7 @@
         }
         if (/insufficient authentication scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(detail)) {
           accessToken = null;
+          forgetToken();
           forceConsent = true;
           return new Error('Google didn\'t give CrateSnap permission to use your Google Sheets. Tap "Save to Sheet & Drive" again, and on Google\'s screen tick BOTH boxes (Drive and Sheets) before tapping Continue.');
         }
@@ -1589,9 +1633,11 @@
       // Returns true when everything that is configured was saved.
       async function syncWithGoogle() {
         const tokenPromise = getAccessToken(); // keep first: needs the click gesture
-        el.addToLogBtn.disabled = true;
+        let lockedButton = false;
         try {
           await tokenPromise;
+          el.addToLogBtn.disabled = true;
+          lockedButton = true;
           let note = '';
 
           // 1. Photo -> Drive (only if a photo was taken/picked and not uploaded yet)
@@ -1630,10 +1676,11 @@
           showBanner(`Saved "${data.album}"${currentImageBase64 ? ' photo to Drive and' : ''} ${placed}.${note}`, 'success');
           return true;
         } catch (err) {
+          if (err && err.silent) return false;
           showBanner(err.message || 'Google sync failed.', 'error');
           return false;
         } finally {
-          el.addToLogBtn.disabled = false;
+          if (lockedButton) el.addToLogBtn.disabled = false;
         }
       }
 

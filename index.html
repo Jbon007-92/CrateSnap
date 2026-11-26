@@ -1069,6 +1069,7 @@
       let accessToken = null;
       let accessTokenExpiresAt = 0;
       let pendingToken = null;
+      let forceConsent = false; // re-show Google's permission screen next tap
 
       function loadGis() {
         if (window.google && window.google.accounts && window.google.accounts.oauth2) return Promise.resolve();
@@ -1102,6 +1103,17 @@
             pendingToken = null;
             if (!p) return;
             if (resp && resp.access_token) {
+              // Google's consent screen has a checkbox per permission; a box
+              // left unticked gives a token that can't touch Sheets (403).
+              const oauth2 = window.google.accounts.oauth2;
+              const sheetsOk = !oauth2.hasGrantedAllScopes || oauth2.hasGrantedAllScopes(resp, 'https://www.googleapis.com/auth/spreadsheets');
+              const driveOk = !oauth2.hasGrantedAllScopes || oauth2.hasGrantedAllScopes(resp, 'https://www.googleapis.com/auth/drive.file');
+              if (!sheetsOk || !driveOk) {
+                forceConsent = true;
+                p.reject(new Error(`Google didn't give CrateSnap permission to use your ${!sheetsOk ? 'Google Sheets' : 'Google Drive'}. Tap "Save to Sheet & Drive" again, and on Google's screen tick BOTH boxes (Drive and Sheets) before tapping Continue.`));
+                return;
+              }
+              forceConsent = false;
               accessToken = resp.access_token;
               accessTokenExpiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000 - 60000;
               p.resolve(accessToken);
@@ -1138,7 +1150,7 @@
         }
         return new Promise((resolve, reject) => {
           pendingToken = { resolve, reject };
-          tokenClient.requestAccessToken({ prompt: '' });
+          tokenClient.requestAccessToken({ prompt: forceConsent ? 'consent' : '' });
         });
       }
 
@@ -1233,9 +1245,17 @@
         if (res.status === 400 && /not supported for this document/i.test(detail)) {
           return new Error('That sheet is an Excel (.xlsx) file, which Google won\'t let apps write to. Open it in Google Sheets, choose File → Save as Google Sheets, and put the new link in "Drive & Sheets".');
         }
+        if (/insufficient authentication scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(detail)) {
+          accessToken = null;
+          forceConsent = true;
+          return new Error('Google didn\'t give CrateSnap permission to use your Google Sheets. Tap "Save to Sheet & Drive" again, and on Google\'s screen tick BOTH boxes (Drive and Sheets) before tapping Continue.');
+        }
+        if (/has not been used|is disabled|SERVICE_DISABLED|API has not been/i.test(detail)) {
+          return new Error('The Google Sheets API is switched off for the CrateSnap Audit project. In Google Cloud (project "CrateSnap Audit"): ☰ → APIs & Services → Library → Google Sheets API → Enable. Wait a few minutes, then tap Save again.');
+        }
         if (res.status === 404 || res.status === 403) {
           const who = await signedInEmail();
-          return new Error(`Google can't find that sheet for ${who || 'the account you signed in with'} (error ${res.status}). Check the sheet link in "Drive & Sheets" (it should look like docs.google.com/spreadsheets/d/…), and that this account owns the sheet or has edit access to it.`);
+          return new Error(`${res.status === 404 ? 'Google can\'t find that sheet' : 'Google says no access to that sheet'} for ${who || 'the account you signed in with'} (error ${res.status}${detail ? ': ' + detail : ''}). Check the sheet link in "Drive & Sheets" (it should look like docs.google.com/spreadsheets/d/…), and that this account owns the sheet or has edit access to it.`);
         }
         return new Error(`Saving to the sheet failed (${res.status})${detail ? ': ' + detail : ''} [sheet ${sheetId.slice(0, 6)}…]`);
       }

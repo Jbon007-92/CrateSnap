@@ -168,6 +168,19 @@
         <span id="connectSavedHint" class="text-xs text-stone-500 dark:text-stone-400"></span>
       </div>
 
+      <div class="pt-3 mt-1 border-t border-stone-200 dark:border-stone-800 space-y-1.5">
+        <button
+          id="batchPriceBtn"
+          type="button"
+          class="px-4 py-2 text-xs sm:text-sm font-medium rounded-xl bg-stone-800 hover:bg-stone-900 dark:bg-stone-700 dark:hover:bg-stone-600 text-white transition"
+        >
+          Price unpriced records in the sheet
+        </button>
+        <p id="batchPriceStatus" class="text-xs text-stone-600 dark:text-stone-400">
+          Looks up Discogs/eBay sold prices for every row with no price, assuming NM (station copies). Skips 10-inch LPs, James's own records and anything already priced. Keep this page open while it runs.
+        </p>
+      </div>
+
       <!-- Practical Setup Instructions -->
       <div class="border-t border-stone-200 dark:border-stone-800 pt-3 text-xs text-stone-600 dark:text-stone-400 space-y-2 leading-relaxed">
         <p class="font-semibold text-stone-800 dark:text-stone-200">Quick Setup Options for Live Drive Upload &amp; Sheet Append:</p>
@@ -586,6 +599,8 @@
         geminiApiKey: document.getElementById('geminiApiKey'),
         appsScriptWebhook: document.getElementById('appsScriptWebhook'),
         saveConnectBtn: document.getElementById('saveConnectBtn'),
+        batchPriceBtn: document.getElementById('batchPriceBtn'),
+        batchPriceStatus: document.getElementById('batchPriceStatus'),
         connectSavedHint: document.getElementById('connectSavedHint'),
         themeToggleBtn: document.getElementById('themeToggleBtn'),
         statusBanner: document.getElementById('statusBanner'),
@@ -1899,6 +1914,169 @@
       });
       el.dismissBannerBtn.addEventListener('click', hideBanner);
       el.saveConnectBtn.addEventListener('click', saveConfig);
+
+      // ---------- Batch price estimates for unpriced sheet rows ----------
+      // Runs on this phone with the saved Gemini key and Google sign-in.
+      // Each estimate is written straight to the sheet and labelled in the
+      // notes column, so it can be stopped and re-run safely (priced rows are skipped).
+      let batchPricing = { running: false, stop: false };
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const isTenInch = (t) => /\b10\s*(["”″]|-?\s*inch|in\b)/i.test(t || '');
+
+      async function geminiPriceBatch(apiKey, items) {
+        const list = items.map((it, k) => `${k + 1}. ${it.artist} — ${it.title} — ${[it.label, it.cat].filter(Boolean).join(' ')}${it.year ? ' — ' + it.year : ''}${it.pressing ? ' — ' + it.pressing : ''}`).join('\n');
+        const prompt = [
+          'For each vinyl record below, use Google Search to find what copies of THAT EXACT release (match label and catalog number) have actually SOLD for recently: Discogs sales history / marketplace statistics first, then eBay sold listings. Ignore unsold asking prices when sold data exists.',
+          'Assume Near Mint (NM) vinyl and a VG+ or better jacket: these are lightly played radio-station library copies.',
+          'Give whole US dollars: low and high = the typical range of real sales for NM copies, median = typical NM sale.',
+          'If you cannot find sales data for a record, set found to false and all prices to 0. Do not guess.',
+          'Reply with ONLY a JSON array in a ```json code block, one object per record:',
+          '{"i": <record number>, "low": n, "high": n, "median": n, "found": true|false, "basis": "short source summary, e.g. Discogs: 12 sold, median $34"}',
+          '', list,
+        ].join('\n');
+        const body = { contents: [{ role: 'user', parts: [{ text: prompt }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0 } };
+        const models = ['gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-2.5-flash'];
+        for (let attempt = 0; attempt < 5; attempt++) {
+          let res = null;
+          for (const m of models) {
+            res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(body),
+            });
+            if (res.status !== 404) break;
+          }
+          if (res.status === 429 || res.status >= 500) {
+            el.batchPriceStatus.textContent += ' (Gemini busy, waiting…)';
+            await sleep(20000 * (attempt + 1));
+            continue;
+          }
+          if (!res.ok) {
+            let detail = '';
+            try { detail = (await res.json()).error.message || ''; } catch (e) { /* ignore */ }
+            const err = new Error(`Gemini error ${res.status}${detail ? ': ' + detail : ''}`);
+            err.fatal = true;
+            throw err;
+          }
+          const j = await res.json();
+          const text = (j?.candidates?.[0]?.content?.parts || []).map((pt) => pt.text || '').join('');
+          const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+          const raw = fenced ? fenced[1] : text.slice(text.indexOf('['), text.lastIndexOf(']') + 1);
+          try {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) return arr;
+          } catch (e) { /* retry below */ }
+          await sleep(3000);
+        }
+        return null;
+      }
+
+      async function runBatchPricing() {
+        const tokenPromise = getAccessToken(); // first: needs the tap gesture
+        const sheetId = extractSheetId(connectConfig.sheetUrl);
+        const apiKey = connectConfig.geminiApiKey;
+        if (!sheetId || !apiKey || !connectConfig.googleClientId) {
+          showBanner('Batch pricing needs the sheet link, Google OAuth Client ID and Gemini API key saved in "Drive & Sheets".', 'warn');
+          return;
+        }
+        batchPricing = { running: true, stop: false };
+        el.batchPriceBtn.textContent = 'Stop pricing';
+        let done = 0; let noData = 0; let total = 0;
+        try {
+          await tokenPromise;
+          const api = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}`;
+          const metaRes = await googleFetch(`${api}?fields=sheets(properties(sheetId,title,index))`);
+          if (!metaRes.ok) throw await sheetProblem(metaRes, sheetId);
+          const tabs = ((await metaRes.json()).sheets || []).map((x) => x.properties).sort((a, b) => a.index - b.index);
+          const gid = String(connectConfig.sheetUrl || '').match(/[#&?]gid=(\d+)/);
+          // Prefer the tab that actually has the inventory headers.
+          let tab = null; let grid = null; let h = -1; let keys = null;
+          const ordered = gid ? [tabs.find((t) => String(t.sheetId) === gid[1]), ...tabs].filter(Boolean) : tabs;
+          for (const t of ordered) {
+            const r = await googleFetch(`${api}/values/${encodeURIComponent(quoteSheet(t.title))}?valueRenderOption=UNFORMATTED_VALUE`);
+            if (!r.ok) continue;
+            const g = (await r.json()).values || [];
+            for (let i = 0; i < Math.min(g.length, 30); i++) {
+              const k = (g[i] || []).map(headerKey);
+              if (k.includes('artist') && k.includes('album')) { tab = t; grid = g; h = i; keys = k; break; }
+            }
+            if (tab) break;
+          }
+          if (!tab) throw new Error('Could not find a tab with Artist and Title headers in that sheet.');
+          const col = (key) => keys.indexOf(key);
+          const C = { status: col('status'), artist: col('artist'), title: col('album'), label: col('label'), cat: col('catalog'), year: col('year'),
+            pressing: col('pressing'), ins: col('insurance'), list: col('value'), notes: col('notes') };
+          if (C.list < 0 && C.ins < 0) throw new Error('The sheet has no price columns (insurance or list price) to fill.');
+          const cell = (row, c) => (c >= 0 ? String((row || [])[c] ?? '').trim() : '');
+          const todo = [];
+          for (let r = h + 1; r < grid.length; r++) {
+            const row = grid[r] || [];
+            if (row.slice(0, 3).some((c) => /^\s*(grand\s+)?total/i.test(String(c)))) break;
+            const it = { row: r + 1, artist: cell(row, C.artist), title: cell(row, C.title), label: cell(row, C.label), cat: cell(row, C.cat),
+              year: cell(row, C.year), pressing: cell(row, C.pressing), notes: cell(row, C.notes), status: cell(row, C.status) };
+            if (!it.artist && !it.title) continue;
+            if (cell(row, C.ins) || cell(row, C.list)) continue;           // already priced
+            if (/james/i.test(it.status)) continue;                          // James's own
+            if (isTenInch(it.title + ' ' + it.pressing + ' ' + it.notes)) continue; // 10-inch: grade by hand
+            if (/No sales data found|Estimated NM price/i.test(it.notes)) continue;
+            todo.push(it);
+          }
+          total = todo.length;
+          if (!total) { showBanner('Nothing to price: every eligible row already has a price.', 'success'); return; }
+          const stamp = new Date().toISOString().slice(0, 10);
+          const qs = quoteSheet(tab.title);
+          for (let b = 0; b < todo.length; b += 5) {
+            if (batchPricing.stop) break;
+            const items = todo.slice(b, b + 5);
+            el.batchPriceStatus.textContent = `Pricing ${b + 1}–${b + items.length} of ${total}… (${done} priced so far)`;
+            const res = await geminiPriceBatch(apiKey, items);
+            const updates = [];
+            items.forEach((it, k) => {
+              const x = res && res.find((o) => Number(o.i) === k + 1);
+              const ok = x && x.found && Number(x.median || x.low || x.high) > 0;
+              let note;
+              if (ok) {
+                const low = Math.round(Number(x.low) || 0); const high = Math.round(Number(x.high) || 0);
+                const med = Math.round(Number(x.median) || (low + high) / 2);
+                if (C.list >= 0) updates.push({ range: `${qs}!${colLetter(C.list)}${it.row}`, values: [[med]] });
+                if (C.ins >= 0) updates.push({ range: `${qs}!${colLetter(C.ins)}${it.row}`, values: [[high || med]] });
+                note = `[Estimated NM price ${stamp}: $${low}–$${high}, median $${med}${x.basis ? '. ' + String(x.basis).slice(0, 160) : ''}]`;
+                done++;
+              } else {
+                note = `[No sales data found ${stamp}${res ? '' : ' (Gemini did not answer)'}]`;
+                noData++;
+              }
+              if (C.notes >= 0) updates.push({ range: `${qs}!${colLetter(C.notes)}${it.row}`, values: [[it.notes ? `${note} | ${it.notes}` : note]] });
+            });
+            if (updates.length) {
+              const wr = await googleFetch(`${api}/values:batchUpdate`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data: updates }),
+              });
+              if (!wr.ok) throw await sheetProblem(wr, sheetId);
+            }
+            if (b + 5 < todo.length && !batchPricing.stop) await sleep(6500); // stay under the free-tier rate limit
+          }
+          const msg = `${batchPricing.stop ? 'Stopped. ' : 'Done. '}Priced ${done} of ${total} records (NM assumed)${noData ? `; ${noData} had no sales data` : ''}. Estimates are marked "[Estimated NM price]" in the notes column.`;
+          el.batchPriceStatus.textContent = msg;
+          showBanner(msg, 'success');
+        } catch (err) {
+          if (err && err.silent) return;
+          const msg = `${err.message || 'Batch pricing failed.'} (${done} priced before it stopped; tap again to continue.)`;
+          el.batchPriceStatus.textContent = msg;
+          showBanner(msg, 'error');
+        } finally {
+          batchPricing.running = false;
+          el.batchPriceBtn.textContent = 'Price unpriced records in the sheet';
+        }
+      }
+
+      el.batchPriceBtn.addEventListener('click', () => {
+        if (batchPricing.running) {
+          batchPricing.stop = true;
+          el.batchPriceStatus.textContent += ' Stopping after this batch…';
+          return;
+        }
+        runBatchPricing();
+      });
 
 
       [

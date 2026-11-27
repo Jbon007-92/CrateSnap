@@ -1417,6 +1417,10 @@
         [/label\s*[\/&]\s*cat|cat\w*\s*[\/&]\s*label/, 'labelCat'],
         [/^item\b|item\s*(#|no|num)|^#$|^no\.?$/, 'item'],
         [/status/, 'status'],
+        [/discogs/, 'discogs'],
+        [/ebay/, 'ebay'],
+        [/ready/, 'ready'],
+        [/found in|source file/, 'source'],
         [/location|shelf|crate|\bbin\b|box/, 'blank'],
         [/artist|band|performer/, 'artist'],
         [/^(title|album)|album title|record title/, 'album'],
@@ -1477,6 +1481,10 @@
           case 'value': return data.adjustedValue;
           case 'photo': return realPhotoLink() ? `=HYPERLINK("${realPhotoLink()}","View photo")` : '';
           case 'notes': return notes;
+          case 'discogs': return [data.artist, data.album, data.labelCat].filter(Boolean).join(' ');
+          case 'ebay': return `${data.artist} - ${data.album} LP ${data.labelCat}`.replace(/\s+/g, ' ').slice(0, 80);
+          case 'ready': return false;
+          case 'source': return `CrateSnap ${new Date().toISOString().slice(0, 10)}`;
           case 'date': return new Date().toISOString().slice(0, 10);
           default: return '';
         }
@@ -1492,20 +1500,24 @@
         if (!metaRes.ok) throw await sheetProblem(metaRes, spreadsheetId);
         const meta = await metaRes.json();
         const tabs = (meta.sheets || []).map((x) => x.properties).sort((x, y) => x.index - y.index);
+        // Use the tab that has the inventory headers (Artist + Title), preferring
+        // the tab in the link (#gid=...). Sheets often start with an "About" tab.
         const gidMatch = String(connectConfig.sheetUrl || '').match(/[#&?]gid=(\d+)/);
-        const tab = (gidMatch && tabs.find((t) => String(t.sheetId) === gidMatch[1])) || tabs[0];
-        const qs = quoteSheet(tab.title);
-
-        const gridRes = await googleFetch(`${api}/values/${encodeURIComponent(qs)}?valueRenderOption=FORMULA`);
-        if (!gridRes.ok) throw await sheetProblem(gridRes, spreadsheetId);
-        const grid = (await gridRes.json()).values || [];
-
-        // Header row: first row (in the top 30) with Artist + Title/Album columns.
-        let h = -1;
-        for (let r = 0; r < Math.min(grid.length, 30); r++) {
-          const keys = (grid[r] || []).map(headerKey);
-          if (keys.includes('artist') && (keys.includes('album') || keys.includes('labelCat'))) { h = r; break; }
+        const ordered = gidMatch ? [tabs.find((t) => String(t.sheetId) === gidMatch[1]), ...tabs].filter(Boolean) : tabs;
+        let tab = null; let qs = ''; let grid = []; let h = -1;
+        for (const t of ordered) {
+          const gridRes = await googleFetch(`${api}/values/${encodeURIComponent(quoteSheet(t.title))}?valueRenderOption=FORMULA`);
+          if (!gridRes.ok) throw await sheetProblem(gridRes, spreadsheetId);
+          const g = (await gridRes.json()).values || [];
+          let hh = -1;
+          for (let r = 0; r < Math.min(g.length, 30); r++) {
+            const k = (g[r] || []).map(headerKey);
+            if (k.includes('artist') && (k.includes('album') || k.includes('labelCat'))) { hh = r; break; }
+          }
+          if (!tab) { tab = t; grid = g; h = hh; } // fallback: first tab tried
+          if (hh >= 0) { tab = t; grid = g; h = hh; break; }
         }
+        qs = quoteSheet(tab.title);
 
         if (h < 0) {
           const cells = toTsvRow(data).split('\t');
@@ -1661,14 +1673,17 @@
         if (!metaRes.ok) return null;
         const tabs = ((await metaRes.json()).sheets || []).map((x) => x.properties).sort((x, y) => x.index - y.index);
         const gidMatch = String(connectConfig.sheetUrl || '').match(/[#&?]gid=(\d+)/);
-        const tab = (gidMatch && tabs.find((t) => String(t.sheetId) === gidMatch[1])) || tabs[0];
-        const gridRes = await googleFetch(`${api}/values/${encodeURIComponent(quoteSheet(tab.title))}?valueRenderOption=FORMATTED_VALUE`);
-        if (!gridRes.ok) return null;
-        const grid = (await gridRes.json()).values || [];
-        let h = -1; let keys = [];
-        for (let r = 0; r < Math.min(grid.length, 30); r++) {
-          keys = (grid[r] || []).map(headerKey);
-          if (keys.includes('artist') && keys.includes('album')) { h = r; break; }
+        const ordered = gidMatch ? [tabs.find((t) => String(t.sheetId) === gidMatch[1]), ...tabs].filter(Boolean) : tabs;
+        let grid = []; let h = -1; let keys = [];
+        for (const t of ordered) {
+          const gridRes = await googleFetch(`${api}/values/${encodeURIComponent(quoteSheet(t.title))}?valueRenderOption=FORMATTED_VALUE`);
+          if (!gridRes.ok) continue;
+          const g = (await gridRes.json()).values || [];
+          for (let r = 0; r < Math.min(g.length, 30); r++) {
+            const k = (g[r] || []).map(headerKey);
+            if (k.includes('artist') && k.includes('album')) { grid = g; h = r; keys = k; break; }
+          }
+          if (h >= 0) break;
         }
         if (h < 0) return null;
         const cA = keys.indexOf('artist'); const cT = keys.indexOf('album');

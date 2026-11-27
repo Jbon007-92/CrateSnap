@@ -348,15 +348,29 @@
               />
             </div>
             <div>
-              <label for="conditionSelect" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Condition Grade</label>
+              <label for="conditionSelect" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Vinyl Grade</label>
               <select
                 id="conditionSelect"
                 class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
               >
-                <option value="NM">NM (Near Mint • 100%)</option>
-                <option value="VG+" selected>VG+ (Very Good Plus • 85%)</option>
+                <option value="NM" selected>NM (Near Mint • 100%)</option>
+                <option value="VG+">VG+ (Very Good Plus • 85%)</option>
                 <option value="VG">VG (Very Good • 65%)</option>
                 <option value="G+">G+ (Good Plus • 45%)</option>
+              </select>
+            </div>
+            <div>
+              <label for="sleeveSelect" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Sleeve / Jacket Grade</label>
+              <select
+                id="sleeveSelect"
+                class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="" selected>— not graded —</option>
+                <option value="NM">NM</option>
+                <option value="VG+">VG+</option>
+                <option value="VG">VG</option>
+                <option value="G+">G+</option>
+                <option value="G">G</option>
               </select>
             </div>
           </div>
@@ -625,6 +639,7 @@
         priceLowInput: document.getElementById('priceLowInput'),
         priceHighInput: document.getElementById('priceHighInput'),
         conditionSelect: document.getElementById('conditionSelect'),
+        sleeveSelect: document.getElementById('sleeveSelect'),
         defSeamSplit: document.getElementById('defSeamSplit'),
         defRingWear: document.getElementById('defRingWear'),
         defFoxing: document.getElementById('defFoxing'),
@@ -817,6 +832,7 @@
           labelCat: el.labelCatInput.value.trim() || 'Unlabeled',
           formatYear: el.formatYearInput.value.trim() || 'LP',
           condition: grade,
+          sleeve: el.sleeveSelect.value,
           priceLow: low,
           priceHigh: high,
           priceRange: `$${low}–$${high}`,
@@ -909,6 +925,7 @@
           // New photo = new record: clear the previous record's details.
           [el.artistInput, el.albumInput, el.labelCatInput, el.formatYearInput, el.notesInput].forEach((i) => { i.value = ''; });
           document.querySelectorAll('.defect-chk').forEach((c) => { c.checked = false; });
+          el.sleeveSelect.value = '';
           syncDriveFields(true);
           refreshOutputs();
           showBanner(`Photo loaded (${file.name}). Tap "Identify & Appraise Photo" to analyze.`, 'info');
@@ -1118,9 +1135,8 @@
           if (parsed.formatYear) el.formatYearInput.value = parsed.formatYear;
           if (typeof parsed.priceLow === 'number') el.priceLowInput.value = Math.max(1, Math.round(parsed.priceLow));
           if (typeof parsed.priceHigh === 'number') el.priceHighInput.value = Math.max(1, Math.round(parsed.priceHigh));
-          if (parsed.condition && GRADE_MULTIPLIERS[parsed.condition]) {
-            el.conditionSelect.value = parsed.condition;
-          }
+          // Vinyl grade stays NM unless you change it: a photo of the jacket
+          // can't show the vinyl's condition (station copies are mostly NM).
           el.defSeamSplit.checked = Boolean(parsed.seamSplit);
           el.defRingWear.checked = Boolean(parsed.ringWear);
           el.defFoxing.checked = Boolean(parsed.foxing);
@@ -1428,7 +1444,7 @@
         [/^label/, 'label'],
         [/year/, 'year'],
         [/pressing|matrix|format|edition|variant/, 'pressing'],
-        [/sleeve|jacket|cover/, 'blank'],
+        [/sleeve|jacket|cover/, 'sleeve'],
         [/media|vinyl|disc|grade|condition/, 'grade'],
         [/insurance|replacement/, 'insurance'],
         [/\blow\b|min/, 'low'],
@@ -1474,6 +1490,7 @@
           case 'year': return yearMatch ? Number(yearMatch[0]) : '';
           case 'pressing': return data.formatYear;
           case 'grade': return data.condition;
+          case 'sleeve': return data.sleeve || '';
           case 'insurance': return data.priceHigh;
           case 'low': return data.priceLow;
           case 'high': return data.priceHigh;
@@ -1674,14 +1691,14 @@
         const tabs = ((await metaRes.json()).sheets || []).map((x) => x.properties).sort((x, y) => x.index - y.index);
         const gidMatch = String(connectConfig.sheetUrl || '').match(/[#&?]gid=(\d+)/);
         const ordered = gidMatch ? [tabs.find((t) => String(t.sheetId) === gidMatch[1]), ...tabs].filter(Boolean) : tabs;
-        let grid = []; let h = -1; let keys = [];
+        let grid = []; let h = -1; let keys = []; let tabTitle = '';
         for (const t of ordered) {
           const gridRes = await googleFetch(`${api}/values/${encodeURIComponent(quoteSheet(t.title))}?valueRenderOption=FORMATTED_VALUE`);
           if (!gridRes.ok) continue;
           const g = (await gridRes.json()).values || [];
           for (let r = 0; r < Math.min(g.length, 30); r++) {
             const k = (g[r] || []).map(headerKey);
-            if (k.includes('artist') && k.includes('album')) { grid = g; h = r; keys = k; break; }
+            if (k.includes('artist') && k.includes('album')) { grid = g; h = r; keys = k; tabTitle = t.title; break; }
           }
           if (h >= 0) break;
         }
@@ -1697,9 +1714,44 @@
           if (normDup(row[cA]) !== artist || normDup(row[cT]) !== title) continue;
           const rowCat = cC >= 0 ? normCat(row[cC]) : '';
           if (cat && rowCat && !rowCat.includes(cat) && !cat.includes(rowCat)) continue; // different pressing
-          return { row: r + 1, item: cI >= 0 ? row[cI] : '' };
+          return { row: r + 1, item: cI >= 0 ? row[cI] : '', tabTitle, keys, values: row };
         }
         return null;
+      }
+      // Fill in an existing row: only empty cells get new data (photo, sleeve
+      // grade, year, prices...). Notes are added on, never replaced. Item #,
+      // status and anything already filled in are left alone.
+      async function updateExistingRow(spreadsheetId, dup, data) {
+        const api = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
+        const qs = quoteSheet(dup.tabTitle);
+        const skip = new Set(['item', 'status', 'blank', 'date', 'source', 'ready', null, undefined]);
+        const used = new Set(); const updates = []; const filled = [];
+        dup.keys.forEach((key, c) => {
+          if (!key || used.has(key)) return;
+          used.add(key);
+          if (skip.has(key)) return;
+          const v = valueForKey(key, data, dup.item);
+          if (v === '' || v === null || v === undefined || v === false) return;
+          const cur = String((dup.values || [])[c] ?? '').trim();
+          if (key === 'notes') {
+            const add = String(v).trim();
+            if (!add || cur.includes(add)) return;
+            updates.push({ range: `${qs}!${colLetter(c)}${dup.row}`, values: [[cur ? `${cur} | ${add}` : add]] });
+            filled.push('notes');
+            return;
+          }
+          if (cur !== '') return; // never overwrite what's already there
+          updates.push({ range: `${qs}!${colLetter(c)}${dup.row}`, values: [[v]] });
+          filled.push(key === 'value' ? 'list price' : key === 'grade' ? 'vinyl grade' : key === 'sleeve' ? 'sleeve grade' : key);
+        });
+        if (!updates.length) return [];
+        const wr = await googleFetch(`${api}/values:batchUpdate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data: updates }),
+        });
+        if (!wr.ok) throw await sheetProblem(wr, spreadsheetId);
+        return filled;
       }
       let duplicateOverride = ''; // signature the user chose to save again anyway
       let syncInFlight = false;
@@ -1716,19 +1768,14 @@
           lockedButton = true;
           let note = '';
 
-          // 0. Stop if this record is already on the sheet (before uploading the photo).
+          // 0. Is this record already on the sheet? Then fill in its row instead
+          //    of adding a new one (a second tap on Save adds a new row anyway).
           const dupSheetId = extractSheetId(connectConfig.sheetUrl);
+          let dup = null; let dupSig = '';
           if (dupSheetId) {
             const d0 = computeAppraisal();
-            const sig = [normDup(d0.artist), normDup(d0.album), normCat(d0.labelCat)].join('|');
-            if (duplicateOverride !== sig) {
-              const dup = await findDuplicateInSheet(dupSheetId, d0);
-              if (dup) {
-                duplicateOverride = sig; // a second tap on Save adds it anyway
-                showBanner(`"${d0.album}" is already on your sheet (row ${dup.row}${dup.item ? ', item #' + dup.item : ''}). Nothing was added. If this is a second copy, tap Save again to add it anyway.`, 'warn');
-                return false;
-              }
-            }
+            dupSig = [normDup(d0.artist), normDup(d0.album), normCat(d0.labelCat)].join('|');
+            if (duplicateOverride !== dupSig) dup = await findDuplicateInSheet(dupSheetId, d0);
             duplicateOverride = '';
           }
 
@@ -1762,8 +1809,18 @@
             showBanner(`${currentImageBase64 ? 'Photo uploaded to Drive, but no' : 'No'} Master Audit Sheet link is set in "Drive & Sheets" (it should look like docs.google.com/spreadsheets/d/…), so no row was added.${note}`, 'warn');
             return false;
           }
-          showBanner('Adding the row to your sheet…', 'info');
           const data = computeAppraisal();
+          if (dup) {
+            showBanner('Already on your sheet: filling in that row…', 'info');
+            const filled = await updateExistingRow(sheetId, dup, data);
+            duplicateOverride = dupSig; // tap Save again to add it as a new row
+            const where = `row ${dup.row}${dup.item ? ' (item #' + dup.item + ')' : ''}`;
+            showBanner(filled.length
+              ? `"${data.album}" was already on your sheet, so ${where} was filled in: ${filled.join(', ')}. Nothing already there was changed. If this is a second copy, tap Save again to add it as a new row.${note}`
+              : `"${data.album}" is already on your sheet (${where}) and had nothing missing, so nothing changed. If this is a second copy, tap Save again to add it as a new row.${note}`, filled.length ? 'success' : 'warn');
+            return filled.length > 0;
+          }
+          showBanner('Adding the row to your sheet…', 'info');
           const placed = await writeRowToSheet(sheetId, data);
           showBanner(`Saved "${data.album}"${currentImageBase64 ? ' photo to Drive and' : ''} ${placed}.${note}`, 'success');
           return true;
@@ -2173,6 +2230,7 @@
         el.priceLowInput,
         el.priceHighInput,
         el.conditionSelect,
+        el.sleeveSelect,
         el.defSeamSplit,
         el.defRingWear,
         el.defFoxing,

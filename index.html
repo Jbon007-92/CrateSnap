@@ -401,10 +401,12 @@
                 id="salesStatusSelect"
                 class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
               >
-                <option value="Keep / Audit">Keep / Audit</option>
-                <option value="For Sale - Discogs/eBay" selected>For Sale - Discogs/eBay</option>
-                <option value="DJ Crate (Not For Sale)">DJ Crate (Not For Sale)</option>
+                <option value="Listen First" selected>Listen First</option>
+                <option value="Needs Label Check">Needs Label Check</option>
+                <option value="For Sale - Individual">For Sale - Individual</option>
+                <option value="For Sale - Lot">For Sale - Lot</option>
                 <option value="Listed">Listed</option>
+                <option value="Keep">Keep</option>
               </select>
             </div>
           </div>
@@ -1459,7 +1461,7 @@
         const notes = [data.appliedMods.join(', '), data.notes].filter(Boolean).join(' — ');
         switch (key) {
           case 'item': return itemNo;
-          case 'status': return 'Needs Review';
+          case 'status': return data.salesStatus || 'Listen First';
           case 'artist': return data.artist;
           case 'album': return data.album;
           case 'labelCat': return data.labelCat;

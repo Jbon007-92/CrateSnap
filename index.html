@@ -462,6 +462,13 @@
             >
               Save to Sheet &amp; Drive
             </button>
+            <button
+              id="photoOnlyBtn"
+              type="button"
+              class="flex-1 min-w-[180px] px-4 py-3 text-sm font-semibold rounded-xl bg-stone-200 hover:bg-stone-300 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-900 dark:text-stone-100 transition"
+            >
+              Save Photo Only (identify later)
+            </button>
           </div>
         </section>
       </div>
@@ -1527,8 +1534,8 @@
           case 'value': return data.adjustedValue;
           case 'photo': return realPhotoLink() ? `=HYPERLINK("${realPhotoLink()}","View photo")` : '';
           case 'notes': return notes;
-          case 'discogs': return [data.artist, data.album, data.labelCat].filter(Boolean).join(' ');
-          case 'ebay': return `${data.artist} - ${data.album} LP ${data.labelCat}`.replace(/\s+/g, ' ').slice(0, 80);
+          case 'discogs': return !data.artist ? '' : [data.artist, data.album, data.labelCat].filter(Boolean).join(' ');
+          case 'ebay': return !data.artist ? '' : `${data.artist} - ${data.album} LP ${data.labelCat}`.replace(/\s+/g, ' ').slice(0, 80);
           case 'ready': return false;
           case 'source': return `CrateSnap ${new Date().toISOString().slice(0, 10)}`;
           case 'date': return new Date().toISOString().slice(0, 10);
@@ -1786,6 +1793,7 @@
       let syncInFlight = false;
 
       // Returns true when everything that is configured was saved.
+      let photoOnlyMode = false; // "Save Photo Only": upload the photo, add a Needs ID row
       async function syncWithGoogle() {
         if (syncInFlight) return false; // ignore double taps while a save is running
         syncInFlight = true;
@@ -1801,7 +1809,7 @@
           //    of adding a new one (a second tap on Save adds a new row anyway).
           const dupSheetId = extractSheetId(connectConfig.sheetUrl);
           let dup = null; let dupSig = '';
-          if (dupSheetId) {
+          if (dupSheetId && !photoOnlyMode) {
             const d0 = computeAppraisal();
             dupSig = [normDup(d0.artist), normDup(d0.album), normCat(d0.labelCat)].join('|');
             if (duplicateOverride !== dupSig) dup = await findDuplicateInSheet(dupSheetId, d0);
@@ -1838,7 +1846,12 @@
             showBanner(`${currentImageBase64 ? 'Photo uploaded to Drive, but no' : 'No'} Master Audit Sheet link is set in "Drive & Sheets" (it should look like docs.google.com/spreadsheets/d/…), so no row was added.${note}`, 'warn');
             return false;
           }
-          const data = computeAppraisal();
+          let data = computeAppraisal();
+          if (photoOnlyMode) {
+            data = { ...data, artist: '', album: '(needs ID - see photo)', labelCat: '', formatYear: '', condition: '', sleeve: '',
+              priceLow: '', priceHigh: '', priceRange: '', adjustedValue: '', appliedMods: [],
+              notes: 'Photo only - identify from the Drive photo.', salesStatus: 'Needs ID' };
+          }
           if (dup) {
             showBanner('Already on your sheet: filling in that row…', 'info');
             const filled = await updateExistingRow(sheetId, dup, data);
@@ -1968,6 +1981,13 @@
         renderSessionLog();
         return entry;
       }
+
+      document.getElementById('photoOnlyBtn').addEventListener('click', async () => {
+        if (!currentImageBase64) { showBanner('Take or choose a photo first.', 'warn'); return; }
+        if (!connectConfig.googleClientId) { showBanner('Photo-only saving needs Google sign-in set up in "Drive & Sheets".', 'warn'); return; }
+        photoOnlyMode = true;
+        try { await syncWithGoogle(); } finally { photoOnlyMode = false; }
+      });
 
       el.addToLogBtn.addEventListener('click', async () => {
         // Google path must start synchronously inside the tap (sign-in popup).

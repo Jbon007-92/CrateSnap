@@ -960,6 +960,45 @@
         }
       }
 
+      // ---------- Gemini with model fallback ----------
+      // Each Gemini model has its own free daily quota. When one model's daily
+      // quota is used up (429 "per day"), move on to the next model instead of
+      // failing, and skip that model for the rest of the day.
+      const GEMINI_FALLBACK_MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-flash-latest'];
+      const QUOTA_KEY = 'cratesnap_gemini_spent_v1';
+      const today = () => new Date().toISOString().slice(0, 10);
+      function spentModels() {
+        try { const o = JSON.parse(localStorage.getItem(QUOTA_KEY) || '{}'); return o.day === today() ? (o.models || []) : []; } catch (e) { return []; }
+      }
+      function markSpent(model) {
+        try { const m = spentModels(); if (!m.includes(model)) m.push(model); localStorage.setItem(QUOTA_KEY, JSON.stringify({ day: today(), models: m })); } catch (e) { /* ignore */ }
+      }
+      async function geminiGenerate(apiKey, body) {
+        const spent = spentModels();
+        let models = GEMINI_FALLBACK_MODELS.filter((m) => !spent.includes(m));
+        if (!models.length) models = GEMINI_FALLBACK_MODELS.slice(); // new quota may have reset
+        let last = null;
+        for (const model of models) {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(body),
+            });
+            last = r;
+            if (r.status === 404) break;                       // model retired: try next
+            if (r.status === 429) {
+              let txt = '';
+              try { txt = await r.clone().text(); } catch (e) { /* ignore */ }
+              if (/per\s*day|PerDay|daily/i.test(txt)) { markSpent(model); break; } // daily quota gone: next model
+              await new Promise((res) => setTimeout(res, 2000 * (attempt + 1)));    // per-minute limit: wait, retry
+              continue;
+            }
+            if (r.status >= 500) { await new Promise((res) => setTimeout(res, 2000 * (attempt + 1))); continue; }
+            return r;
+          }
+        }
+        return last;
+      }
+
       async function analyzePhotoWithGemini() {
         if (!currentImageBase64) {
           showBanner('Please capture or upload a record photo first.', 'warn');
@@ -979,7 +1018,6 @@
 
         try {
           // Newest model first; fall back if Google has retired a preview name.
-          const GEMINI_MODELS = ['gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-2.5-flash'];
 
           const prompt = [
             'Identify this vinyl record and jacket from the photo.',
@@ -1044,18 +1082,7 @@
             },
           };
 
-          const callGemini = async (body) => {
-            let r = null;
-            for (const model of GEMINI_MODELS) {
-              r = await fetchWithBackoff(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-                body: JSON.stringify(body),
-              });
-              if (r.status !== 404) break;
-            }
-            return r;
-          };
+          const callGemini = (body) => geminiGenerate(apiKey, body);
 
           const parseJsonLoose = (text) => {
             const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -1113,7 +1140,9 @@
                 const j = await response.json();
                 detail = (j.error && j.error.message) || '';
               } catch (e) { /* ignore */ }
-              const err = new Error(`Gemini error ${response.status}${detail ? ': ' + detail : ''}`);
+              const err = new Error(response.status === 429
+                ? 'All of the free Gemini models have used up today\'s quota (it resets around 2 AM Central). You can still type the details in yourself and save, or turn on billing for your Gemini key to remove the limit.'
+                : `Gemini error ${response.status}${detail ? ': ' + detail : ''}`);
               err.userFacing = true;
               throw err;
             }
@@ -2070,15 +2099,8 @@
           '', list,
         ].join('\n');
         const body = { contents: [{ role: 'user', parts: [{ text: prompt }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0 } };
-        const models = ['gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-2.5-flash'];
         for (let attempt = 0; attempt < 5; attempt++) {
-          let res = null;
-          for (const m of models) {
-            res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(body),
-            });
-            if (res.status !== 404) break;
-          }
+          const res = await geminiGenerate(apiKey, body);
           if (res.status === 429 || res.status >= 500) {
             el.batchPriceStatus.textContent += ' (Gemini busy, waiting…)';
             await sleep(20000 * (attempt + 1));

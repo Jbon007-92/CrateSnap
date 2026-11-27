@@ -1650,8 +1650,49 @@
       let uploadedImageRef = null; // avoids uploading the same photo twice on retry
       let uploadedImageLink = '';
 
+      // ---------- Duplicate check before saving ----------
+      // Looks for a row with the same artist + title (and the same catalog #
+      // when both have one). Returns {row, item} or null.
+      const normDup = (x) => String(x || '').toLowerCase().replace(/\(.*?\)/g, '').replace(/[^a-z0-9]/g, '');
+      const normCat = (x) => String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      async function findDuplicateInSheet(spreadsheetId, data) {
+        const api = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
+        const metaRes = await googleFetch(`${api}?fields=sheets(properties(sheetId,title,index))`);
+        if (!metaRes.ok) return null;
+        const tabs = ((await metaRes.json()).sheets || []).map((x) => x.properties).sort((x, y) => x.index - y.index);
+        const gidMatch = String(connectConfig.sheetUrl || '').match(/[#&?]gid=(\d+)/);
+        const tab = (gidMatch && tabs.find((t) => String(t.sheetId) === gidMatch[1])) || tabs[0];
+        const gridRes = await googleFetch(`${api}/values/${encodeURIComponent(quoteSheet(tab.title))}?valueRenderOption=FORMATTED_VALUE`);
+        if (!gridRes.ok) return null;
+        const grid = (await gridRes.json()).values || [];
+        let h = -1; let keys = [];
+        for (let r = 0; r < Math.min(grid.length, 30); r++) {
+          keys = (grid[r] || []).map(headerKey);
+          if (keys.includes('artist') && keys.includes('album')) { h = r; break; }
+        }
+        if (h < 0) return null;
+        const cA = keys.indexOf('artist'); const cT = keys.indexOf('album');
+        const cC = keys.indexOf('catalog') >= 0 ? keys.indexOf('catalog') : keys.indexOf('labelCat');
+        const cI = keys.indexOf('item');
+        const artist = normDup(data.artist); const title = normDup(data.album);
+        const cat = normCat(splitLabelCat(data.labelCat).catalog || data.labelCat);
+        if (!artist || !title) return null;
+        for (let r = h + 1; r < grid.length; r++) {
+          const row = grid[r] || [];
+          if (normDup(row[cA]) !== artist || normDup(row[cT]) !== title) continue;
+          const rowCat = cC >= 0 ? normCat(row[cC]) : '';
+          if (cat && rowCat && !rowCat.includes(cat) && !cat.includes(rowCat)) continue; // different pressing
+          return { row: r + 1, item: cI >= 0 ? row[cI] : '' };
+        }
+        return null;
+      }
+      let duplicateOverride = ''; // signature the user chose to save again anyway
+      let syncInFlight = false;
+
       // Returns true when everything that is configured was saved.
       async function syncWithGoogle() {
+        if (syncInFlight) return false; // ignore double taps while a save is running
+        syncInFlight = true;
         const tokenPromise = getAccessToken(); // keep first: needs the click gesture
         let lockedButton = false;
         try {
@@ -1659,6 +1700,22 @@
           el.addToLogBtn.disabled = true;
           lockedButton = true;
           let note = '';
+
+          // 0. Stop if this record is already on the sheet (before uploading the photo).
+          const dupSheetId = extractSheetId(connectConfig.sheetUrl);
+          if (dupSheetId) {
+            const d0 = computeAppraisal();
+            const sig = [normDup(d0.artist), normDup(d0.album), normCat(d0.labelCat)].join('|');
+            if (duplicateOverride !== sig) {
+              const dup = await findDuplicateInSheet(dupSheetId, d0);
+              if (dup) {
+                duplicateOverride = sig; // a second tap on Save adds it anyway
+                showBanner(`"${d0.album}" is already on your sheet (row ${dup.row}${dup.item ? ', item #' + dup.item : ''}). Nothing was added. If this is a second copy, tap Save again to add it anyway.`, 'warn');
+                return false;
+              }
+            }
+            duplicateOverride = '';
+          }
 
           // 1. Photo -> Drive (only if a photo was taken/picked and not uploaded yet)
           if (currentImageBase64 && uploadedImageRef === currentImageBase64) {
@@ -1700,6 +1757,7 @@
           showBanner(err.message || 'Google sync failed.', 'error');
           return false;
         } finally {
+          syncInFlight = false;
           if (lockedButton) el.addToLogBtn.disabled = false;
         }
       }

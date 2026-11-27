@@ -326,7 +326,7 @@
           <!-- Price Range & Condition Grade -->
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label for="priceLowInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Est. Low ($)</label>
+              <label for="priceLowInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Low / worn copies ($)</label>
               <input
                 id="priceLowInput"
                 type="number"
@@ -337,7 +337,7 @@
               />
             </div>
             <div>
-              <label for="priceHighInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Est. High ($)</label>
+              <label for="priceHighInput" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">NM value ($)</label>
               <input
                 id="priceHighInput"
                 type="number"
@@ -784,9 +784,11 @@
         const grade = el.conditionSelect.value;
         const mult = GRADE_MULTIPLIERS[grade] ?? 0.85;
 
-        // Midpoint baseline scaled by condition grade, then defect/autograph adjustments applied
-        const midpoint = (low + high) / 2;
-        const gradedBase = midpoint * mult;
+        // Start from the Near Mint value (the "NM value" field), scale by the
+        // vinyl grade, then apply defect/autograph adjustments. A NM record with
+        // no defects is worth the full NM value, not the midpoint of the range.
+        const nmValue = high;
+        const gradedBase = nmValue * mult;
 
         let adjustmentDelta = 0;
         const appliedMods = [];
@@ -803,7 +805,7 @@
         el.priceRangeDisplay.textContent = `$${low}–$${high} range`;
         el.adjustedValueDisplay.textContent = `$${adjustedValue}`;
         el.valuationBreakdown.textContent =
-          `Mid $${Math.round(midpoint)} × ${grade} (${Math.round(mult * 100)}%)` +
+          `NM $${Math.round(nmValue)} × ${grade} (${Math.round(mult * 100)}%)` +
           (adjustmentDelta !== 0 ? ` ${adjustmentDelta > 0 ? '+' : ''}$${adjustmentDelta}` : '');
 
         return {
@@ -963,7 +965,7 @@
             'Identify this vinyl record and jacket from the photo.',
             'Return a JSON object with keys:',
             'artist, album, labelCat (label + catalog number), label, catalogNumber, formatYear (format, year, pressing details), priceLow (number), priceHigh (number), condition (one of NM, VG+, VG, G+), seamSplit (boolean), ringWear (boolean), foxing (boolean), autograph (boolean), notes (string).',
-            'Base priceLow and priceHigh in USD for typical collector market value.',
+            'priceHigh is the USD value of a Near Mint copy of this pressing; priceLow is the value of a worn (VG or lower) copy.',
           ].join(' ');
 
           const payload = {
@@ -1054,7 +1056,7 @@
           const groundedPrompt = [
             'Step 1: Identify this exact vinyl record pressing from the photo (artist, album, label, catalog number, year, country, mono/stereo, original vs reissue).',
             'Step 2: Use Google Search to find what copies of THIS pressing have actually SOLD for recently: Discogs sales history / marketplace statistics for the matching release, and eBay sold listings. Ignore asking prices of unsold listings when sold data exists.',
-            'Set priceLow and priceHigh (USD) to the typical range of those real sales (roughly the 25th to 75th percentile), not a guess. Round to whole dollars.',
+            'Set priceHigh (USD) to what a Near Mint copy typically sells for (use the NM / M- sales; if grades are not shown, use roughly the 75th-90th percentile of sales). Set priceLow to what a worn VG or lower copy sells for. Use real sales, not a guess. Round to whole dollars.',
             'Step 3: Judge visible condition from the photo.',
             'Reply with ONLY one JSON object in a ```json code block, keys:',
             'artist, album, labelCat (label + catalog number), label, catalogNumber, formatYear (format, year, pressing details), priceLow (number), priceHigh (number), condition (one of NM, VG+, VG, G+), seamSplit (boolean), ringWear (boolean), foxing (boolean), autograph (boolean), notes (string), priceBasis (string, e.g. "Discogs: 14 sales, median $68; eBay sold $55-$80").',

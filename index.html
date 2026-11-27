@@ -366,16 +366,16 @@
             <p class="text-xs font-medium text-stone-700 dark:text-stone-300 mb-2">Defect Deductions &amp; Provenance Adjustments</p>
             <div class="grid grid-cols-2 gap-2 text-xs">
               <label class="flex items-center gap-2 p-2.5 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 cursor-pointer">
-                <input id="defSeamSplit" type="checkbox" data-delta="-6" class="defect-chk rounded text-amber-600 focus:ring-amber-500" />
-                <span>Seam splits (-$6)</span>
+                <input id="defSeamSplit" type="checkbox" data-pct="-15" class="defect-chk rounded text-amber-600 focus:ring-amber-500" />
+                <span>Seam splits (-15%)</span>
               </label>
               <label class="flex items-center gap-2 p-2.5 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 cursor-pointer">
-                <input id="defRingWear" type="checkbox" data-delta="-5" class="defect-chk rounded text-amber-600 focus:ring-amber-500" />
-                <span>Ring / scuff wear (-$5)</span>
+                <input id="defRingWear" type="checkbox" data-pct="-10" class="defect-chk rounded text-amber-600 focus:ring-amber-500" />
+                <span>Ring / scuff wear (-10%)</span>
               </label>
               <label class="flex items-center gap-2 p-2.5 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 cursor-pointer">
-                <input id="defFoxing" type="checkbox" data-delta="-4" class="defect-chk rounded text-amber-600 focus:ring-amber-500" />
-                <span>Foxing / edge wear (-$4)</span>
+                <input id="defFoxing" type="checkbox" data-pct="-5" class="defect-chk rounded text-amber-600 focus:ring-amber-500" />
+                <span>Foxing / edge wear (-5%)</span>
               </label>
               <label class="flex items-center gap-2 p-2.5 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 cursor-pointer">
                 <input id="defAutograph" type="checkbox" data-delta="25" class="defect-chk rounded text-emerald-600 focus:ring-emerald-500" />
@@ -794,7 +794,8 @@
         const appliedMods = [];
         document.querySelectorAll('.defect-chk').forEach((chk) => {
           if (chk.checked) {
-            const delta = Number(chk.dataset.delta) || 0;
+            // Jacket defects take a percentage of the graded value; autograph adds a flat amount.
+            const delta = chk.dataset.pct ? gradedBase * (Number(chk.dataset.pct) / 100) : (Number(chk.dataset.delta) || 0);
             adjustmentDelta += delta;
             appliedMods.push(chk.parentElement.textContent.trim());
           }
@@ -806,7 +807,7 @@
         el.adjustedValueDisplay.textContent = `$${adjustedValue}`;
         el.valuationBreakdown.textContent =
           `NM $${Math.round(nmValue)} × ${grade} (${Math.round(mult * 100)}%)` +
-          (adjustmentDelta !== 0 ? ` ${adjustmentDelta > 0 ? '+' : ''}$${adjustmentDelta}` : '');
+          (adjustmentDelta !== 0 ? ` ${adjustmentDelta > 0 ? '+' : '−'}$${Math.round(Math.abs(adjustmentDelta))}` : '');
 
         return {
           artist: el.artistInput.value.trim() || 'Unknown Artist',

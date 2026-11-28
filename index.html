@@ -1667,7 +1667,13 @@
         }
         const prev = lastIdx > h ? (grid[lastIdx] || []) : [];
         const formulaCols = new Set();
-        prev.forEach((c, i) => { if (typeof c === 'string' && c.startsWith('=')) formulaCols.add(i); });
+        // Copy real formulas (e.g. =L12*0.8) down, but never a photo link:
+        // copying =HYPERLINK("...") gave every new row the previous record's photo.
+        prev.forEach((c, i) => {
+          if (typeof c !== 'string' || !c.startsWith('=')) return;
+          if (keys[i] === 'photo' || /^=\s*HYPERLINK\s*\(\s*"/i.test(c)) return;
+          formulaCols.add(i);
+        });
 
         const requests = [];
         const colCount = (tab.gridProperties && tab.gridProperties.columnCount) || 26;

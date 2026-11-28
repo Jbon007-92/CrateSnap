@@ -1809,6 +1809,8 @@
           const [sh, lg] = a.length <= b.length ? [a, b] : [b, a];
           return sh.length >= 4 && lg.includes(sh);
         };
+        const nameWords = (x) => String(x || '').toLowerCase().replace(/'s\b/g, '').split(/[^a-z0-9]+/).filter((w) => w.length >= 5 && !['quartet', 'quintet', 'orchestra', 'various', 'artists', 'band', 'trio', 'sextet', 'septet', 'group', 'with', 'their', 'stompers', 'rompers'].includes(w));
+        const shareName = (a, b) => { const A = new Set(nameWords(a)); return nameWords(b).some((w) => A.has(w)); };
         let loose = null;
         for (let r = h + 1; r < grid.length; r++) {
           const row = grid[r] || [];
@@ -1824,6 +1826,9 @@
           if (sameCat && (near(ra, artist) || near(rt, title))) return hit;
           // Names roughly match and nothing says it's a different pressing.
           if (!loose && near(ra, artist) && near(rt, title) && !(cat && rowCat && !sameCat)) loose = hit;
+          // Same title and the artists share a name ("McPartland & Barbarin" vs
+          // "Jimmy McPartland's Chicago Rompers / Paul Barbarin's...").
+          if (!loose && rt === title && title.length >= 6 && !(cat && rowCat && !sameCat) && shareName(row[cA], data.artist)) loose = hit;
         }
         return loose;
       }

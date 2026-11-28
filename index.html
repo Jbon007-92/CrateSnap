@@ -1002,17 +1002,44 @@
       function markSpent(model) {
         try { const m = spentModels(); if (!m.includes(model)) m.push(model); localStorage.setItem(QUOTA_KEY, JSON.stringify({ day: today(), models: m })); } catch (e) { /* ignore */ }
       }
+      // Less "thinking" = much faster replies; identifying a record doesn't need deep reasoning.
+      function fastThinkingFor(model) {
+        if (/^gemini-3/.test(model)) return { thinkingLevel: 'low' };
+        if (/^gemini-2\.5-flash/.test(model)) return { thinkingBudget: 0 };
+        return null;
+      }
+      function withFastThinking(model, body) {
+        const t = fastThinkingFor(model);
+        if (!t) return body;
+        return { ...body, generationConfig: { ...(body.generationConfig || {}), thinkingConfig: t } };
+      }
+      // Phone photos are several MB; Gemini reads a record label fine at ~1600px,
+      // and a smaller upload is much faster. The full photo still goes to Drive.
+      async function shrinkForAI(b64, mime) {
+        try {
+          const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = `data:${mime};base64,${b64}`; });
+          const max = 1600; const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+          if (scale >= 1 && b64.length < 1500000) return { data: b64, mime };
+          const c = document.createElement('canvas');
+          c.width = Math.round(img.naturalWidth * scale); c.height = Math.round(img.naturalHeight * scale);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          const url = c.toDataURL('image/jpeg', 0.85);
+          return { data: url.slice(url.indexOf(',') + 1), mime: 'image/jpeg' };
+        } catch (e) { return { data: b64, mime }; }
+      }
       async function geminiGenerate(apiKey, body) {
         const spent = spentModels();
         let models = GEMINI_FALLBACK_MODELS.filter((m) => !spent.includes(m));
         if (!models.length) models = GEMINI_FALLBACK_MODELS.slice(); // new quota may have reset
         let last = null;
         for (const model of models) {
+          let fast = true; // ask for light "thinking" so answers come back faster
           for (let attempt = 0; attempt < 3; attempt++) {
             const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(body),
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(fast ? withFastThinking(model, body) : body),
             });
             last = r;
+            if (r.status === 400 && fast && fastThinkingFor(model)) { fast = false; attempt--; continue; } // setting not supported: retry plain
             if (r.status === 404) break;                       // model retired: try next
             if (r.status === 429) {
               let txt = '';
@@ -1047,6 +1074,7 @@
 
         try {
           // Newest model first; fall back if Google has retired a preview name.
+          const aiImg = await shrinkForAI(currentImageBase64, currentImageMime);
 
           const prompt = [
             'Identify this vinyl record and jacket from the photo.',
@@ -1063,8 +1091,8 @@
                   { text: prompt },
                   {
                     inlineData: {
-                      mimeType: currentImageMime,
-                      data: currentImageBase64,
+                      mimeType: aiImg.mime,
+                      data: aiImg.data,
                     },
                   },
                 ],
@@ -1139,7 +1167,7 @@
           ].join(' ');
           try {
             const gr = await callGemini({
-              contents: [{ role: 'user', parts: [{ text: groundedPrompt }, { inlineData: { mimeType: currentImageMime, data: currentImageBase64 } }] }],
+              contents: [{ role: 'user', parts: [{ text: groundedPrompt }, { inlineData: { mimeType: aiImg.mime, data: aiImg.data } }] }],
               tools: [{ google_search: {} }],
               generationConfig: { temperature: 0 },
             });
@@ -1767,14 +1795,31 @@
         const artist = normDup(data.artist); const title = normDup(data.album);
         const cat = normCat(splitLabelCat(data.labelCat).catalog || data.labelCat);
         if (!artist || !title) return null;
+        // "Keno Duke" vs "Keno Duke / Contemporaries", "Homecoming" vs "Homecoming: Live at...":
+        // one name containing the other counts as the same.
+        const near = (a, b) => {
+          if (!a || !b) return false;
+          if (a === b) return true;
+          const [sh, lg] = a.length <= b.length ? [a, b] : [b, a];
+          return sh.length >= 4 && lg.includes(sh);
+        };
+        let loose = null;
         for (let r = h + 1; r < grid.length; r++) {
           const row = grid[r] || [];
-          if (normDup(row[cA]) !== artist || normDup(row[cT]) !== title) continue;
+          const ra = normDup(row[cA]); const rt = normDup(row[cT]);
           const rowCat = cC >= 0 ? normCat(row[cC]) : '';
-          if (cat && rowCat && !rowCat.includes(cat) && !cat.includes(rowCat)) continue; // different pressing
-          return { row: r + 1, item: cI >= 0 ? row[cI] : '', tabTitle, keys, values: row };
+          const sameCat = cat && rowCat && cat.length >= 4 && (rowCat === cat || rowCat.endsWith(cat) || cat.endsWith(rowCat));
+          const hit = { row: r + 1, item: cI >= 0 ? row[cI] : '', tabTitle, keys, values: row };
+          if (ra === artist && rt === title) {
+            if (cat && rowCat && !rowCat.includes(cat) && !cat.includes(rowCat)) continue; // different pressing
+            return hit;
+          }
+          // Same catalog number and the artist or title roughly matches: same record.
+          if (sameCat && (near(ra, artist) || near(rt, title))) return hit;
+          // Names roughly match and nothing says it's a different pressing.
+          if (!loose && near(ra, artist) && near(rt, title) && !(cat && rowCat && !sameCat)) loose = hit;
         }
-        return null;
+        return loose;
       }
       // Fill in an existing row: only empty cells get new data (photo, sleeve
       // grade, year, prices...). Notes are added on, never replaced. Item #,

@@ -134,6 +134,18 @@
           />
         </div>
         <div>
+          <label for="discogsToken" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+            Discogs Personal Access Token (for "Look up on Discogs", free)
+          </label>
+          <input
+            id="discogsToken"
+            type="password"
+            autocomplete="off"
+            placeholder="from discogs.com/settings/developers"
+            class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+          />
+        </div>
+        <div>
           <label for="googleClientId" class="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
             Google OAuth Client ID (GIS / Drive &amp; Sheets API)
           </label>
@@ -321,6 +333,14 @@
                 class="w-full px-3 py-2 text-sm rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
+          </div>
+
+          <div class="space-y-2">
+            <button id="discogsLookupBtn" type="button" class="w-full sm:w-auto px-4 py-2 text-sm font-semibold rounded-xl bg-stone-900 hover:bg-stone-800 text-white dark:bg-stone-100 dark:text-stone-900 transition">
+              Look up on Discogs (free)
+            </button>
+            <p class="text-xs text-stone-500 dark:text-stone-400">Searches by the catalog # (best), or artist + title. Pick the matching pressing to fill in the details and Discogs prices.</p>
+            <div id="discogsResults" class="space-y-2"></div>
           </div>
 
           <!-- Price Range & Condition Grade -->
@@ -620,6 +640,7 @@
         sheetUrlInput: document.getElementById('sheetUrlInput'),
         googleClientId: document.getElementById('googleClientId'),
         geminiApiKey: document.getElementById('geminiApiKey'),
+        discogsToken: document.getElementById('discogsToken'),
         appsScriptWebhook: document.getElementById('appsScriptWebhook'),
         saveConnectBtn: document.getElementById('saveConnectBtn'),
         batchPriceBtn: document.getElementById('batchPriceBtn'),
@@ -745,6 +766,7 @@
           sheetUrl: el.sheetUrlInput.value.trim(),
           googleClientId: el.googleClientId.value.trim(),
           geminiApiKey: el.geminiApiKey.value.trim(),
+          discogsToken: el.discogsToken.value.trim(),
           appsScriptWebhook: el.appsScriptWebhook.value.trim(),
         };
         try {
@@ -2287,11 +2309,112 @@
       });
 
       // --- Initialization ---
+
+      // ---------- Discogs lookup (free API, personal token) ----------
+      const DISCOGS = 'https://api.discogs.com';
+      async function discogsGet(path, params = {}) {
+        const token = connectConfig.discogsToken;
+        if (!token) throw new Error('Add your Discogs token in "Drive & Sheets" first.');
+        const q = new URLSearchParams({ ...params, token });
+        const r = await fetch(`${DISCOGS}${path}?${q}`);
+        if (r.status === 401) throw new Error('Discogs did not accept the token. Check it in "Drive & Sheets".');
+        if (r.status === 429) throw new Error('Discogs is rate-limiting (60 lookups a minute). Wait a minute and try again.');
+        if (!r.ok) return null;
+        return r.json();
+      }
+      const escHtml = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+      async function discogsSearch() {
+        const box = document.getElementById('discogsResults');
+        const labelCat = el.labelCatInput.value.trim();
+        const cat = splitLabelCat(labelCat).catalog;
+        const artist = el.artistInput.value.trim();
+        const title = el.albumInput.value.trim();
+        if (!cat && !artist && !title) { showBanner('Type a catalog # (or artist and title) first.', 'warn'); return; }
+        box.innerHTML = '<p class="text-xs">Searching Discogs…</p>';
+        try {
+          let res = [];
+          if (cat) {
+            const j = await discogsGet('/database/search', { catno: cat, type: 'release', per_page: 15 });
+            res = (j && j.results) || [];
+            // narrow by artist/title words when we have them
+            if (res.length > 1 && (artist || title)) {
+              const words = `${artist} ${title}`.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
+              const scored = res.map((x) => ({ x, s: words.filter((w) => String(x.title).toLowerCase().includes(w)).length }));
+              const best = Math.max(...scored.map((o) => o.s));
+              if (best > 0) res = scored.filter((o) => o.s === best).map((o) => o.x);
+            }
+          }
+          if (!res.length && (artist || title)) {
+            const j = await discogsGet('/database/search', { artist, release_title: title, type: 'release', format: 'Vinyl', per_page: 15 });
+            res = (j && j.results) || [];
+          }
+          if (!res.length) { box.innerHTML = '<p class="text-xs">No Discogs match. Check the catalog # (as printed on the label) or try artist + title.</p>'; return; }
+          box.innerHTML = res.slice(0, 10).map((x, i) => `
+            <button type="button" data-i="${i}" class="discogs-pick w-full flex gap-3 items-center text-left p-2 rounded-xl border border-stone-300 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800">
+              ${x.thumb ? `<img src="${escHtml(x.thumb)}" alt="" class="w-12 h-12 rounded object-cover flex-none" />` : ''}
+              <span class="text-xs leading-snug"><b>${escHtml(x.title)}</b><br>${escHtml((x.label || [])[0] || '')} ${escHtml(x.catno || '')} · ${escHtml(x.year || '?')} · ${escHtml(x.country || '')}<br>${escHtml((x.format || []).join(', '))}</span>
+            </button>`).join('') + '<p class="text-xs text-stone-500">Tap the one that matches your label (check year, country and format).</p>';
+          box.querySelectorAll('.discogs-pick').forEach((b) => b.addEventListener('click', () => discogsPick(res[Number(b.dataset.i)])));
+        } catch (e) {
+          box.innerHTML = '';
+          showBanner(e.message, 'error');
+        }
+      }
+
+      async function discogsPick(hit) {
+        const box = document.getElementById('discogsResults');
+        box.innerHTML = '<p class="text-xs">Loading release and prices…</p>';
+        try {
+          const rel = await discogsGet(`/releases/${hit.id}`);
+          if (!rel) throw new Error('Could not load that release from Discogs.');
+          const artist = (rel.artists || []).map((a) => a.name.replace(/\s*\(\d+\)$/, '')).join(' & ');
+          const label = (rel.labels || [])[0] || {};
+          const fmt = (rel.formats || [])[0] || {};
+          const fmtText = [fmt.qty && fmt.qty !== '1' ? `${fmt.qty}x` : '', fmt.name, ...(fmt.descriptions || [])].filter(Boolean).join(' ');
+          el.artistInput.value = artist || el.artistInput.value;
+          el.albumInput.value = rel.title || el.albumInput.value;
+          el.labelCatInput.value = [label.name, label.catno].filter(Boolean).join(' ');
+          aiLabelSplit = { labelCat: el.labelCatInput.value, label: label.name || '', catalogNumber: label.catno || '' };
+          el.formatYearInput.value = [fmtText, rel.year || '', rel.country || ''].filter(Boolean).join(' • ');
+
+          // Prices: Discogs price suggestions by grade (needs seller settings filled in),
+          // otherwise the current marketplace stats.
+          let nm = null; let low = null; let src = '';
+          const sug = await discogsGet(`/marketplace/price_suggestions/${hit.id}`).catch(() => null);
+          const val = (k) => (sug && sug[k] && typeof sug[k].value === 'number' ? Math.round(sug[k].value) : null);
+          if (sug && val('Near Mint (NM or M-)')) {
+            nm = val('Near Mint (NM or M-)');
+            low = val('Very Good (VG)') || val('Good Plus (G+)');
+            src = `Discogs price suggestion: NM $${nm}${low ? `, VG $${low}` : ''}`;
+          }
+          const stats = await discogsGet(`/marketplace/stats/${hit.id}`, { curr_abbr: 'USD' }).catch(() => null);
+          const lowest = stats && stats.lowest_price && typeof stats.lowest_price.value === 'number' ? Math.round(stats.lowest_price.value) : null;
+          const forSale = stats ? stats.num_for_sale : null;
+          if (nm == null && lowest != null) { nm = lowest; src = `Discogs lowest current listing $${lowest} (no grade-based suggestion available)`; }
+          if (nm != null) el.priceHighInput.value = Math.max(1, nm);
+          if (low != null) el.priceLowInput.value = Math.max(1, low);
+          else if (nm != null) el.priceLowInput.value = Math.max(1, Math.round(nm * 0.5));
+          const community = rel.community ? ` Have/want: ${rel.community.have}/${rel.community.want}.` : '';
+          const info = `Discogs release ${hit.id} (discogs.com/release/${hit.id}). ${src ? src + '.' : 'No Discogs price data.'}${forSale != null ? ` ${forSale} for sale${lowest != null ? `, lowest $${lowest}` : ''}.` : ''}${community}`;
+          const cur = el.notesInput.value.replace(/\s*Discogs release \d+[^]*?(?=$|\n)/, '').trim();
+          el.notesInput.value = cur ? `${cur} ${info}` : info;
+          refreshOutputs();
+          box.innerHTML = `<p class="text-xs">Filled in from Discogs. ${escHtml(src || 'No price data on Discogs for this release.')}</p>`;
+          showBanner(`Matched on Discogs: ${artist} – ${rel.title}${nm != null ? ` · NM value $${nm}` : ''}`, 'success');
+        } catch (e) {
+          box.innerHTML = '';
+          showBanner(e.message, 'error');
+        }
+      }
+      document.getElementById('discogsLookupBtn').addEventListener('click', discogsSearch);
+
       initTheme();
       el.driveFolderId.value = connectConfig.driveFolderId || '';
       el.sheetUrlInput.value = connectConfig.sheetUrl || '';
       el.googleClientId.value = connectConfig.googleClientId || '';
       el.geminiApiKey.value = connectConfig.geminiApiKey || '';
+      el.discogsToken.value = connectConfig.discogsToken || '';
       el.appsScriptWebhook.value = connectConfig.appsScriptWebhook || '';
       updateConnectBadge();
       preloadGoogleSignIn();
